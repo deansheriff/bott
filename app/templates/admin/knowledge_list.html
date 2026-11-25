@@ -1,0 +1,36 @@
+{% extends "admin/layout.html" %}
+{% set active = "knowledge" %}
+{% block title %}Knowledge{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-2xl font-semibold">Knowledge</h1>
+  <form method="post" action="/admin/knowledge/reindex"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="border rounded px-3 py-1 text-sm">Reindex ({{ chunks }} chunks)</button></form>
+</div>
+{% if error %}<p class="mb-3 text-sm bg-red-50 text-red-700 p-2 rounded">{{ error }}</p>{% endif %}
+<table class="w-full bg-white shadow rounded text-sm">
+  <thead class="text-left text-slate-500"><tr><th class="p-2">File</th><th class="p-2">Size</th><th class="p-2">Versions</th></tr></thead>
+  <tbody>
+  {% for f in files %}
+    <tr class="border-t"><td class="p-2"><a class="underline" href="/admin/knowledge/{{ f.name }}">{{ f.name }}</a></td><td class="p-2">{{ "{:,}".format(f.size) }} B</td><td class="p-2">{{ f.versions }}</td></tr>
+  {% else %}
+    <tr><td class="p-2 text-slate-500" colspan="3">No knowledge files yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<form method="post" action="/admin/knowledge/upload" enctype="multipart/form-data" class="mt-4 bg-white shadow rounded p-4 space-y-2 text-sm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2 class="font-semibold">Import a document</h2>
+  <p class="text-xs text-slate-500">Upload an FAQ, policy or menu notes as PDF, Word (.docx), .txt or .md (max 10 MB). It's converted to Markdown and opened in the editor so you can check it. <strong>Nothing goes live until you click “Save version”.</strong> Scanned PDFs (images) can't be read. Questions ending in “?” become their own sections, which helps the bot find answers.</p>
+  <div class="flex flex-wrap gap-2 items-center">
+    <input type="file" name="document" required accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown">
+    <input name="save_as" pattern="[a-z0-9][a-z0-9_\-]{0,60}(\.md)?" placeholder="Save as (optional), e.g. faq.md" class="border rounded px-2 py-1">
+    <button class="bg-slate-900 text-white rounded px-3 py-1">Upload and review</button>
+  </div>
+  <p class="text-xs text-slate-500">Prices in documents are NOT used for quoting: the bot only quotes prices from the Menu and Delivery zones tables.</p>
+</form>
+<form method="post" action="/admin/knowledge/new" class="mt-4 flex gap-2">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input name="filename" required pattern="[a-z0-9][a-z0-9_\-]{0,60}(\.md)?" placeholder="new-file.md" class="border rounded px-2 py-1 text-sm">
+  <button class="bg-slate-900 text-white rounded px-3 text-sm">Create file</button>
+</form>
+{% endblock %}

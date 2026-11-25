@@ -1,0 +1,33 @@
+{% extends "admin/layout.html" %}
+{% set active = "settings" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Settings</h1>
+{% if flash %}<p class="mb-3 text-sm bg-green-50 text-green-800 p-2 rounded">{{ flash }}</p>{% endif %}
+{% for e in errors %}<p class="mb-2 text-sm bg-red-50 text-red-700 p-2 rounded">{{ e }}</p>{% endfor %}
+<form method="post" action="/admin/settings" class="bg-white shadow rounded p-4 grid md:grid-cols-2 gap-4 text-sm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>LLM model<input name="llm_model" value="{{ s.llm_model }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label>Daily LLM spend cap (USD)<input name="daily_spend_cap_usd" value="{{ s.daily_spend_cap_usd }}" inputmode="decimal" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label>Timezone (IANA)<input name="timezone_name" value="{{ s.timezone }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label>Currency symbol<input name="currency_symbol" value="{{ s.currency_symbol }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label>Max bot turns before handoff<input name="max_bot_turns" value="{{ s.max_bot_turns }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label>Confidence threshold (0–1)<input name="confidence_threshold" value="{{ s.confidence_threshold }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label class="md:col-span-2">Greeting (prefixed to the bot's first reply in a conversation)<input name="greeting" value="{{ s.greeting }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label class="md:col-span-2">Handoff message to the customer<input name="handoff_message" value="{{ s.handoff_message }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label class="md:col-span-2">Handoff keywords (one <code>category: word, phrase</code> per line)
+    <textarea name="handoff_keywords" rows="6" class="mt-1 w-full border rounded px-2 py-1 font-mono text-xs">{% for cat, words in s.handoff_keywords.items() %}{{ cat }}: {{ words|join(", ") }}
+{% endfor %}</textarea></label>
+  <label class="md:col-span-2">"Wants a human" phrases (comma-separated)<textarea name="human_request_phrases" rows="2" class="mt-1 w-full border rounded px-2 py-1 text-xs">{{ s.human_request_phrases|join(", ") }}</textarea></label>
+  <label>Quick reply: hours<textarea name="qr_hours" rows="3" class="mt-1 w-full border rounded px-2 py-1">{{ s.quick_replies.hours }}</textarea></label>
+  <label>Quick reply: delivery<textarea name="qr_delivery" rows="3" class="mt-1 w-full border rounded px-2 py-1">{{ s.quick_replies.delivery }}</textarea></label>
+  <label>Quick reply: payment<textarea name="qr_payment" rows="3" class="mt-1 w-full border rounded px-2 py-1">{{ s.quick_replies.payment }}</textarea></label>
+  <label>LLM price overrides (USD per 1M tokens, JSON)<textarea name="llm_price_overrides" rows="3" class="mt-1 w-full border rounded px-2 py-1 font-mono text-xs">{{ s.llm_price_overrides|tojson }}</textarea></label>
+  <div class="md:col-span-2"><button class="bg-slate-900 text-white rounded px-4 py-1">Save settings</button> <span class="text-xs text-slate-500">Every change is written to the audit log.</span></div>
+</form>
+<section class="bg-white shadow rounded p-4 mt-6 text-sm">
+  <h2 class="font-semibold mb-2">Chatwoot connection test</h2>
+  <button hx-post="/admin/settings/test-connection" hx-target="#conn" class="border rounded px-3 py-1">Run test</button>
+  <div id="conn" class="mt-2"></div>
+</section>
+{% endblock %}

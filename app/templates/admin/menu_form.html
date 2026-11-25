@@ -1,0 +1,21 @@
+{% extends "admin/layout.html" %}
+{% set active = "menu" %}
+{% block title %}{{ "Edit" if item else "Add" }} menu item{% endblock %}
+{% block content %}
+<p class="text-sm mb-2"><a class="underline" href="/admin/menu">← Menu</a></p>
+<h1 class="text-2xl font-semibold mb-4">{{ "Edit " ~ item.name if item else "Add menu item" }}</h1>
+{% for e in errors %}<p class="mb-2 text-sm bg-red-50 text-red-700 p-2 rounded">{{ e }}</p>{% endfor %}
+<form method="post" action="/admin/menu/save" enctype="multipart/form-data" class="bg-white shadow rounded p-4 space-y-3 max-w-xl">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="item_id" value="{{ item.id if item else '' }}">
+  <label class="block text-sm">Name<input name="name" required maxlength="120" value="{{ form.name or (item.name if item else '') }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label class="block text-sm">Category<input name="category" maxlength="80" value="{{ form.category or (item.category if item else '') }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label class="block text-sm">Price ({{ currency }})<input name="price" required inputmode="decimal" value="{{ form.price or (item.price if item else '') }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label class="block text-sm">Description<textarea name="description" rows="3" maxlength="2000" class="mt-1 w-full border rounded px-2 py-1">{{ form.description or (item.description if item else '') }}</textarea></label>
+  <label class="block text-sm">Photo URL (https)<input name="photo_url" maxlength="500" value="{{ form.photo_url or (item.photo_url if item else '') }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label class="block text-sm">…or upload a photo (JPEG/PNG/WebP, max 2 MB)<input type="file" name="photo" accept="image/jpeg,image/png,image/webp" class="mt-1 block"></label>
+  <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" name="available" {% if not item or item.available %}checked{% endif %}> Available</label>
+  <label class="inline-flex items-center gap-2 text-sm ml-4"><input type="checkbox" name="eighty_sixed" {% if item and item.eighty_sixed_on %}checked{% endif %}> 86'd today</label>
+  <div><button class="bg-slate-900 text-white rounded px-4 py-1 text-sm">Save</button></div>
+</form>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "admin/layout.html" %}
+{% set active = "menu" %}
+{% block title %}Menu{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-2xl font-semibold">Menu</h1>
+  <a href="/admin/menu/new" class="bg-slate-900 text-white rounded px-3 py-1 text-sm">Add item</a>
+</div>
+<p class="text-xs text-slate-500 mb-2">The bot quotes prices and availability only from this table. Changes apply immediately. “86'd today” clears itself at local midnight.</p>
+<table class="w-full bg-white shadow rounded text-sm">
+  <thead class="text-left text-slate-500"><tr><th class="p-2">Item</th><th class="p-2">Category</th><th class="p-2">Price</th><th class="p-2">Available</th><th class="p-2">86'd today</th><th></th></tr></thead>
+  <tbody>
+  {% for i in items %}{% include "admin/_menu_row.html" %}{% else %}
+    <tr><td colspan="6" class="p-2 text-slate-500">No menu items yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

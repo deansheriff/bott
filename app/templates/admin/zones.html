@@ -1,0 +1,29 @@
+{% extends "admin/layout.html" %}
+{% set active = "zones" %}
+{% block title %}Delivery zones{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Delivery zones</h1>
+{% for e in errors %}<p class="mb-2 text-sm bg-red-50 text-red-700 p-2 rounded">{{ e }}</p>{% endfor %}
+<table class="w-full bg-white shadow rounded text-sm mb-6">
+  <thead class="text-left text-slate-500"><tr><th class="p-2">Area</th><th class="p-2">Aliases</th><th class="p-2">Fee</th><th class="p-2">Min order</th><th class="p-2">Active</th><th></th></tr></thead>
+  <tbody>
+  {% for z in zones %}
+    <tr class="border-t">
+      <td class="p-2">{{ z.name }}</td><td class="p-2 text-slate-600">{{ z.aliases }}</td><td class="p-2">{{ z.fee|money(currency) }}</td><td class="p-2">{{ z.min_order|money(currency) }}</td>
+      <td class="p-2"><form method="post" action="/admin/zones/{{ z.id }}/toggle"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="px-2 rounded {% if z.active %}bg-green-100 text-green-800{% else %}bg-slate-200{% endif %}">{{ "Yes" if z.active else "No" }}</button></form></td>
+      <td class="p-2 text-right whitespace-nowrap"><a class="underline" href="/admin/zones?edit={{ z.id }}">Edit</a>
+        <form method="post" action="/admin/zones/{{ z.id }}/delete" class="inline" data-confirm="Delete zone {{ z.name }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-red-700 underline ml-2">Delete</button></form></td>
+    </tr>
+  {% else %}<tr><td colspan="6" class="p-2 text-slate-500">No zones yet. Until you add zones, the bot will say it can't confirm delivery.</td></tr>{% endfor %}
+  </tbody>
+</table>
+<form method="post" action="/admin/zones/save" class="bg-white shadow rounded p-4 grid md:grid-cols-6 gap-2 items-end">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="zone_id" value="{{ edit.id if edit else '' }}">
+  <label class="text-sm md:col-span-1">Area<input name="name" required value="{{ edit.name if edit else '' }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label class="text-sm md:col-span-2">Aliases (comma-separated)<input name="aliases" value="{{ edit.aliases if edit else '' }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label class="text-sm">Fee<input name="fee" required inputmode="decimal" value="{{ edit.fee if edit else '' }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label class="text-sm">Min order<input name="min_order" inputmode="decimal" value="{{ edit.min_order if edit else '0' }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <div class="flex items-center gap-2"><label class="text-sm"><input type="checkbox" name="active" {% if not edit or edit.active %}checked{% endif %}> Active</label>
+    <button class="bg-slate-900 text-white rounded px-3 py-1 text-sm">{{ "Update" if edit else "Add" }}</button></div>
+</form>
+{% endblock %}

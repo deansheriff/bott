@@ -1,0 +1,30 @@
+{% extends "admin/layout.html" %}
+{% set active = "audit" %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Audit log <span class="text-sm font-normal text-slate-500">({{ total }} entries, read-only)</span></h1>
+<form method="get" class="bg-white shadow rounded p-3 mb-4 flex flex-wrap gap-2 items-end text-sm">
+  <label>User<input name="user" value="{{ f.user }}" class="block border rounded px-1"></label>
+  <label>Entity<select name="entity" class="block border rounded px-1"><option value="">any</option>{% for e in entities %}<option {% if e == f.entity %}selected{% endif %}>{{ e }}</option>{% endfor %}</select></label>
+  <label>Action<input name="action" value="{{ f.action }}" class="block border rounded px-1"></label>
+  <label>From<input type="date" name="since" value="{{ f.since }}" class="block border rounded px-1"></label>
+  <label>To<input type="date" name="until" value="{{ f.until }}" class="block border rounded px-1"></label>
+  <button class="border rounded px-3 py-1">Filter</button>
+</form>
+<table class="w-full bg-white shadow rounded text-xs">
+  <thead class="text-left text-slate-500"><tr><th class="p-2">When</th><th class="p-2">Who</th><th class="p-2">Action</th><th class="p-2">Entity</th><th class="p-2">Before</th><th class="p-2">After</th></tr></thead>
+  {% for r in rows %}
+  <tr class="border-t align-top">
+    <td class="p-2 whitespace-nowrap">{{ r.created_at|local("%Y-%m-%d %H:%M:%S") }}</td><td class="p-2">{{ r.user_email }}<div class="text-slate-400">{{ r.ip or "" }}</div></td>
+    <td class="p-2">{{ r.action }}</td><td class="p-2">{{ r.entity }} {{ r.entity_id or "" }}</td>
+    <td class="p-2"><pre class="whitespace-pre-wrap max-w-xs">{{ dumps(r.before) if r.before is not none else "" }}</pre></td>
+    <td class="p-2"><pre class="whitespace-pre-wrap max-w-xs">{{ dumps(r.after) if r.after is not none else "" }}</pre></td>
+  </tr>
+  {% else %}<tr><td colspan="6" class="p-2 text-slate-500">No entries.</td></tr>{% endfor %}
+</table>
+<div class="mt-3 text-sm flex gap-3">
+  {% if page > 1 %}<a class="underline" href="?user={{ f.user|urlencode }}&entity={{ f.entity|urlencode }}&action={{ f.action|urlencode }}&since={{ f.since|urlencode }}&until={{ f.until|urlencode }}&page={{ page - 1 }}">← Newer</a>{% endif %}
+  <span>Page {{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a class="underline" href="?user={{ f.user|urlencode }}&entity={{ f.entity|urlencode }}&action={{ f.action|urlencode }}&since={{ f.since|urlencode }}&until={{ f.until|urlencode }}&page={{ page + 1 }}">Older →</a>{% endif %}
+</div>
+{% endblock %}

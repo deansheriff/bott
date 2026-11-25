@@ -1,0 +1,11 @@
+<tr class="border-t" id="menu-row-{{ i.id }}">
+  <td class="p-2">{% if i.photo_url %}<img src="{{ i.photo_url }}" alt="" class="inline h-8 w-8 object-cover rounded mr-2">{% endif %}{{ i.name }}</td>
+  <td class="p-2">{{ i.category }}</td>
+  <td class="p-2">{{ i.price|money(currency) }}</td>
+  <td class="p-2"><button hx-post="/admin/menu/{{ i.id }}/toggle/available" hx-target="#menu-row-{{ i.id }}" hx-swap="outerHTML" class="px-2 rounded {% if i.available %}bg-green-100 text-green-800{% else %}bg-slate-200{% endif %}">{{ "Yes" if i.available else "No" }}</button></td>
+  <td class="p-2"><button hx-post="/admin/menu/{{ i.id }}/toggle/eighty_six" hx-target="#menu-row-{{ i.id }}" hx-swap="outerHTML" class="px-2 rounded {% if i.eighty_sixed_on == today %}bg-red-100 text-red-800{% else %}bg-slate-100{% endif %}">{{ "86'd" if i.eighty_sixed_on == today else "—" }}</button></td>
+  <td class="p-2 text-right whitespace-nowrap">
+    <a class="underline" href="/admin/menu/{{ i.id }}/edit">Edit</a>
+    <form method="post" action="/admin/menu/{{ i.id }}/delete" class="inline" data-confirm="Delete {{ i.name }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-red-700 underline ml-2">Delete</button></form>
+  </td>
+</tr>

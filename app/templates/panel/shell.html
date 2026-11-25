@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="htmx-config" content='{"allowEval": false, "allowScriptTags": false, "selfRequestsOnly": true}'>
+  <title>Restaurant Bot panel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="bg-white text-slate-800 text-sm">
+<div id="panel-root" data-chatwoot-origin="{{ chatwoot_origin }}" class="p-3">
+  <div id="panel"><p class="text-slate-500">Waiting for conversation context from Chatwoot…</p></div>
+</div>
+
+<template id="tpl-login">
+  <div class="space-y-3">
+    <h1 class="font-semibold text-base">Restaurant Bot</h1>
+    <p>Connect this panel to your bot admin account. This is needed once per browser session.</p>
+    <ol class="list-decimal ml-5 space-y-1">
+      <li>Click <strong>Log in</strong>. A new tab opens.</li>
+      <li>Log in and confirm the code <strong class="font-mono" data-slot="code">····-····</strong>.</li>
+      <li>Come back here and click <strong>I've logged in</strong>.</li>
+    </ol>
+    <div class="flex gap-2">
+      <a data-slot="login-link" href="#" target="_blank" rel="noopener noreferrer" class="bg-slate-900 text-white rounded px-3 py-1">Log in</a>
+      <button type="button" data-action="claim" class="border rounded px-3 py-1">I've logged in</button>
+    </div>
+    <p data-slot="status" class="text-xs text-slate-500"></p>
+  </div>
+</template>
+
+<script src="/static/panel.js"></script>
+</body>
+</html>

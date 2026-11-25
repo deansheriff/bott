@@ -1,0 +1,13 @@
+<div class="space-y-2">
+  {% if reason == "no_token" %}
+    <p><strong>Connect your Chatwoot API token first.</strong> Messages you send from this panel go out under your own name.</p>
+    <a href="/admin/profile" target="_blank" rel="noopener noreferrer" class="inline-block bg-slate-900 text-white rounded px-3 py-1">Open my profile</a>
+    <button type="button" data-action="reload" class="border rounded px-3 py-1">Done, reload</button>
+  {% elif reason == "token_invalid" %}
+    <p class="text-red-700">Chatwoot rejected your saved API token. Update it in your profile.</p>
+    <a href="/admin/profile" target="_blank" rel="noopener noreferrer" class="underline">Open my profile</a>
+  {% else %}
+    <p class="text-red-700">Your Chatwoot account can't access this conversation.</p>
+  {% endif %}
+  <p class="text-xs text-slate-500">Signed in as {{ user.email }}. <button type="button" data-action="logout" class="underline">Sign out of panel</button></p>
+</div>

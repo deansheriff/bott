@@ -1,0 +1,59 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      CHATWOOT_BASE_URL: ${CHATWOOT_BASE_URL}
+      CHATWOOT_PUBLIC_URL: ${CHATWOOT_PUBLIC_URL:-}
+      CHATWOOT_ACCOUNT_ID: ${CHATWOOT_ACCOUNT_ID}
+      CHATWOOT_BOT_TOKEN: ${CHATWOOT_BOT_TOKEN}
+      CHATWOOT_WEBHOOK_SECRET: ${CHATWOOT_WEBHOOK_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      DATABASE_URL: postgresql+psycopg://bot:${POSTGRES_PASSWORD}@db:5432/bot
+      SESSION_SECRET: ${SESSION_SECRET}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
+      DASHBOARD_ADMIN_EMAIL: ${DASHBOARD_ADMIN_EMAIL}
+      DASHBOARD_ADMIN_PASSWORD: ${DASHBOARD_ADMIN_PASSWORD}
+      DASHBOARD_ALLOWED_IPS: ${DASHBOARD_ALLOWED_IPS:-}
+      DAILY_LLM_SPEND_CAP_USD: ${DAILY_LLM_SPEND_CAP_USD:-5}
+      TIMEZONE: ${TIMEZONE:-Africa/Lagos}
+      RESTAURANT_NAME: ${RESTAURANT_NAME:-Our Restaurant}
+      COOKIE_SECURE: "true"
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - knowledge:/app/knowledge
+      - media:/app/data/media
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: bot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot -d bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  knowledge:
+  media:
+  pgdata:

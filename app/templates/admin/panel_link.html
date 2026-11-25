@@ -1,0 +1,25 @@
+{% extends "admin/layout.html" %}
+{% block title %}Connect Dashboard App{% endblock %}
+{% block content %}
+<div class="bg-white shadow rounded p-6 max-w-lg">
+  <h1 class="text-xl font-semibold mb-3">Connect the Chatwoot panel</h1>
+  {% if done %}
+    <p class="text-green-800 bg-green-50 p-3 rounded">Connected. Go back to Chatwoot and click <strong>“I've logged in”</strong> in the Restaurant Bot tab. You can close this tab.</p>
+  {% elif valid %}
+    <p class="text-sm mb-3">The Restaurant Bot tab in Chatwoot is asking to act as <strong>{{ user.email }}</strong>.</p>
+    <p class="text-sm mb-3">Check that the code below matches the code shown in that tab. <strong>Only confirm if you just clicked “Log in” there yourself.</strong></p>
+    <p class="text-3xl font-mono tracking-widest text-center my-4">{{ code }}</p>
+    <form method="post" action="/admin/panel-link">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="code" value="{{ code }}">
+      <button class="bg-slate-900 text-white rounded px-4 py-2">Confirm and connect</button>
+    </form>
+  {% else %}
+    {% if code %}<p class="text-sm text-red-700 mb-3">This link code is invalid, already used, or expired (codes last 10 minutes). Click “Log in” in the Chatwoot tab again.</p>{% endif %}
+    <form method="get" action="/admin/panel-link" class="flex gap-2">
+      <input name="code" required maxlength="16" placeholder="Code shown in the Chatwoot tab, e.g. 1A2B-3C4D" class="flex-1 border rounded px-2 py-1 text-sm font-mono uppercase">
+      <button class="bg-slate-900 text-white rounded px-3 text-sm">Continue</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

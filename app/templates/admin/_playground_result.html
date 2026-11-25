@@ -1,0 +1,24 @@
+<div class="bg-white shadow rounded p-4 space-y-3 text-sm">
+  {% if error %}<p class="text-red-700">{{ error }}</p>{% endif %}
+  {% if decision %}
+    <p class="p-2 rounded {% if decision.red_flag %}bg-red-50 text-red-800{% else %}bg-amber-50 text-amber-900{% endif %}">
+      {% if decision.red_flag %}🚩 {% endif %}<strong>Would hand off</strong>: {{ decision.reason }} ({{ decision.category }})</p>
+  {% elif answer %}
+    <p class="p-2 rounded bg-green-50 text-green-800"><strong>Would reply</strong></p>
+  {% endif %}
+  {% if answer %}
+    <div><div class="text-xs text-slate-500">Reply · confidence {{ "%.2f"|format(answer.confidence) }} · language {{ answer.language or "?" }} · cost ${{ "%.5f"|format(answer.cost_usd) }}</div>
+      <p class="whitespace-pre-wrap border rounded p-2 mt-1">{{ answer.reply }}</p>
+      {% if answer.reason %}<p class="text-xs text-slate-500 mt-1">Model reason: {{ answer.reason }}</p>{% endif %}
+      {% if answer.unverified_amounts %}<p class="text-xs text-red-700">Unverified amounts: {{ answer.unverified_amounts|join(", ") }}</p>{% endif %}
+    </div>
+    <details open><summary class="font-semibold cursor-pointer">Knowledge chunks ({{ answer.chunks|length }})</summary>
+      {% for c in answer.chunks %}<div class="border rounded p-2 mt-1"><div class="text-xs text-slate-500">{{ c.chunk.source }} › {{ c.chunk.heading }} · score {{ "%.2f"|format(c.score) }}</div><pre class="whitespace-pre-wrap text-xs">{{ c.chunk.text }}</pre></div>
+      {% else %}<p class="text-slate-500">None matched.</p>{% endfor %}
+    </details>
+    <details open><summary class="font-semibold cursor-pointer">Tool calls ({{ answer.tool_calls|length }})</summary>
+      {% for t in answer.tool_calls %}<div class="border rounded p-2 mt-1"><div class="font-mono text-xs">{{ t.name }}({{ t.args|tojson }})</div><pre class="whitespace-pre-wrap text-xs text-slate-600">{{ t.output|tojson(indent=2) }}</pre></div>
+      {% else %}<p class="text-slate-500">No tools called.</p>{% endfor %}
+    </details>
+  {% endif %}
+</div>

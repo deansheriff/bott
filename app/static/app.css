@@ -1,0 +1,11 @@
+.htmx-indicator { display: none; }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline; }
+.prose h1 { font-size: 1.5rem; font-weight: 600; margin: .5rem 0; }
+.prose h2 { font-size: 1.25rem; font-weight: 600; margin: .5rem 0; }
+.prose h3 { font-weight: 600; margin: .5rem 0; }
+.prose p, .prose ul, .prose ol { margin: .4rem 0; }
+.prose ul { list-style: disc; padding-left: 1.25rem; }
+.prose ol { list-style: decimal; padding-left: 1.25rem; }
+.prose table { border-collapse: collapse; }
+.prose td, .prose th { border: 1px solid #cbd5e1; padding: 2px 6px; }
+.prose a { text-decoration: underline; }

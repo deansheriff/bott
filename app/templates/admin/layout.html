@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="flex min-h-screen">
+  <nav class="w-56 bg-slate-900 text-slate-200 flex flex-col">
+    <div class="px-4 py-4 font-semibold text-white">{{ restaurant_name() }}<div class="text-xs text-slate-400 font-normal">Bot admin</div></div>
+    {% set items = [
+      ("overview", "/admin/", "Overview"), ("knowledge", "/admin/knowledge", "Knowledge"), ("menu", "/admin/menu", "Menu"),
+      ("zones", "/admin/zones", "Delivery zones"), ("hours", "/admin/hours", "Hours & closures"), ("playground", "/admin/playground", "Playground"),
+      ("analytics", "/admin/analytics", "Analytics"), ("settings", "/admin/settings", "Settings"), ("users", "/admin/users", "Users"),
+      ("audit", "/admin/audit", "Audit log"), ("profile", "/admin/profile", "My profile")] %}
+    {% for perm, href, label in items %}{% if can(perm) %}
+      <a href="{{ href }}" class="px-4 py-2 text-sm hover:bg-slate-800 {% if active == perm %}bg-slate-800 text-white{% endif %}">{{ label }}</a>
+    {% endif %}{% endfor %}
+    <div class="mt-auto p-4 text-xs text-slate-400">
+      {{ user.email }} · {{ user.role }}
+      <form method="post" action="/admin/logout" class="mt-2"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="underline">Log out</button></form>
+    </div>
+  </nav>
+  <main class="flex-1 p-6 max-w-6xl">
+    {% if spend_cap_reached %}
+      <div class="mb-4 rounded border border-red-300 bg-red-50 p-3 text-red-800 text-sm"><strong>Daily LLM spend cap reached.</strong> The bot is in handoff-only mode: every new message goes to a human until the cap resets at local midnight or is raised in Settings.</div>
+    {% endif %}
+    {% if bot_switch and bot_switch != "ON" %}
+      <div class="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-amber-900 text-sm">Bot switch is <strong>{{ bot_switch }}</strong>.</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% endblock %}

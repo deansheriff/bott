@@ -1,0 +1,33 @@
+{% extends "admin/layout.html" %}
+{% set active = "profile" %}
+{% block title %}My profile{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">My profile</h1>
+{% if flash %}<p class="mb-4 text-sm bg-green-50 text-green-800 p-2 rounded">{{ flash }}</p>{% endif %}
+{% if error %}<p class="mb-4 text-sm bg-red-50 text-red-700 p-2 rounded">{{ error }}</p>{% endif %}
+<div class="grid gap-4 md:grid-cols-2">
+  <section class="bg-white shadow rounded p-4">
+    <h2 class="font-semibold mb-2">Account</h2>
+    <p class="text-sm">{{ user.email }} · role <strong>{{ user.role }}</strong></p>
+    <a href="/admin/password" class="inline-block mt-3 text-sm underline">Change password</a>
+  </section>
+  <section class="bg-white shadow rounded p-4">
+    <h2 class="font-semibold mb-2">Chatwoot API token</h2>
+    <p class="text-xs text-slate-500 mb-2">Messages you send from the Dashboard App go out under your own Chatwoot name using this token. Find it in Chatwoot: your avatar → Profile settings → Access Token. It is stored encrypted.</p>
+    {% if user.chatwoot_token_enc %}
+      <p class="text-sm text-green-800">Connected as {{ user.chatwoot_name or "Chatwoot user" }} (id {{ user.chatwoot_user_id }}).</p>
+      <form method="post" action="/admin/profile/chatwoot-token/delete" class="mt-2"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-sm text-red-700 underline">Disconnect</button></form>
+    {% endif %}
+    <form method="post" action="/admin/profile/chatwoot-token" class="mt-3 flex gap-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input name="token" type="password" autocomplete="off" placeholder="{% if user.chatwoot_token_enc %}Replace token{% else %}Paste access token{% endif %}" class="flex-1 border rounded px-2 py-1 text-sm">
+      <button class="bg-slate-900 text-white rounded px-3 text-sm">Save</button>
+    </form>
+  </section>
+  <section class="bg-white shadow rounded p-4">
+    <h2 class="font-semibold mb-2">Dashboard App sessions</h2>
+    <p class="text-sm mb-2"><a class="underline" href="/admin/panel-link">Enter a code from the Chatwoot tab</a></p>
+    <form method="post" action="/admin/profile/panel-sessions/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-sm underline">Sign out of all Chatwoot panels</button></form>
+  </section>
+</div>
+{% endblock %}

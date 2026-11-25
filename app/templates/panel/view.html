@@ -1,0 +1,116 @@
+{% set cid = conversation_id %}
+<div class="space-y-4" data-conversation-id="{{ cid }}">
+  {% if flash %}<p class="text-xs bg-green-50 text-green-800 p-2 rounded">{{ flash }}</p>{% endif %}
+  {% if spend_cap_reached %}<p class="text-xs bg-red-50 text-red-800 p-2 rounded">Daily LLM spend cap reached: the bot is in handoff-only mode.</p>{% endif %}
+
+  {# ---------------- bot status ---------------- #}
+  <section class="border rounded p-3">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-xs text-slate-500">Conversation #{{ cid }} · Chatwoot status {{ chatwoot_status or "?" }}</div>
+        <div class="font-semibold">
+          {% if bot_status == "active" %}<span class="text-green-700">● Bot active</span>
+          {% elif bot_status == "paused" %}<span class="text-slate-600">● Paused (human took over)</span>
+          {% elif bot_status == "resolved" %}<span class="text-slate-600">● Resolved</span>
+          {% else %}<span class="text-amber-700">● Handed off</span>{% endif %}
+          {% if bot_switch and bot_switch != "ON" %}<span class="text-xs text-amber-700"> (global switch {{ bot_switch }})</span>{% endif %}
+        </div>
+      </div>
+      <div class="flex gap-2">
+        {% if bot_status == "active" %}
+          <button hx-post="/app-panel/api/conversations/{{ cid }}/takeover" hx-target="#panel" hx-confirm="Take over this conversation? The bot will stop replying." class="bg-slate-900 text-white rounded px-3 py-1">Take over</button>
+        {% else %}
+          <button hx-post="/app-panel/api/conversations/{{ cid }}/return-to-bot" hx-target="#panel" hx-confirm="Return this conversation to the bot (status pending)?" class="border rounded px-3 py-1">Return to bot</button>
+        {% endif %}
+      </div>
+    </div>
+    {% if state and state.handoff_reason %}
+      <div class="mt-2 p-2 rounded {% if red_flag %}bg-red-50 border border-red-300 text-red-800{% else %}bg-amber-50 text-amber-900{% endif %}">
+        {% if red_flag %}🚩 <strong>{{ state.handoff_category|replace("_", " ")|upper }}</strong> · {% endif %}Escalation reason: {{ state.handoff_reason }}
+        {% if state.handoff_at %}<span class="text-xs opacity-70"> ({{ state.handoff_at|local }})</span>{% endif %}
+      </div>
+    {% endif %}
+  </section>
+
+  {# ---------------- latest bot reply ---------------- #}
+  <section class="border rounded p-3">
+    <h2 class="font-semibold mb-1">Latest bot decision</h2>
+    {% if latest %}
+      <div class="text-xs text-slate-500">{{ latest.created_at|local }} · confidence {{ "%.2f"|format(latest.confidence) if latest.confidence is not none else "—" }}{% if latest.handoff %} · handed off ({{ latest.handoff_category }}){% endif %}</div>
+      <p class="mt-1"><span class="text-slate-500">Customer:</span> {{ latest.question }}</p>
+      {% if latest.reply %}<p class="mt-1 whitespace-pre-wrap"><span class="text-slate-500">{{ "Suggested" if latest.handoff else "Bot" }}:</span> {{ latest.reply }}</p>{% endif %}
+      <details class="mt-2"><summary class="cursor-pointer text-xs">Knowledge chunks ({{ latest.chunks|length }})</summary>
+        {% for c in latest.chunks %}<div class="border rounded p-1 mt-1 text-xs"><div class="text-slate-500">{{ c.source }} › {{ c.heading }} · {{ c.score }}</div><pre class="whitespace-pre-wrap">{{ c.text }}</pre></div>{% endfor %}
+      </details>
+      <details class="mt-1"><summary class="cursor-pointer text-xs">Tool calls ({{ latest.tool_calls|length }})</summary>
+        {% for t in latest.tool_calls %}<div class="border rounded p-1 mt-1 text-xs"><div class="font-mono">{{ t.name }}({{ t.args|tojson }})</div><pre class="whitespace-pre-wrap text-slate-600">{{ t.output|tojson(indent=1) }}</pre></div>{% endfor %}
+      </details>
+    {% else %}<p class="text-slate-500">The bot hasn't handled this conversation.</p>{% endif %}
+  </section>
+
+  {# ---------------- transcript ---------------- #}
+  <section class="border rounded p-3">
+    <div class="flex items-center justify-between mb-1"><h2 class="font-semibold">Transcript (recent)</h2>
+      <button type="button" data-action="translate-last" data-lang="en" class="text-xs underline">Translate last message → English</button></div>
+    <div class="space-y-1 max-h-56 overflow-auto">
+      {% for m in transcript %}
+        <div class="{% if m.private %}bg-yellow-50{% elif m.direction == 'incoming' %}bg-slate-100{% else %}bg-blue-50{% endif %} rounded px-2 py-1 whitespace-pre-wrap" {% if m.direction == 'incoming' and not m.private %}data-last-incoming{% endif %}>
+          <span class="text-xs text-slate-500">{{ "Customer" if m.direction == "incoming" else ("Note" if m.private else ("Bot" if m.sender_type == "agent_bot" else "Agent")) }}:</span> {{ m.content }}</div>
+      {% else %}<p class="text-slate-500">No messages stored yet.</p>{% endfor %}
+    </div>
+    <p id="translation-out" class="mt-1 text-xs bg-slate-50 rounded px-2 hidden"></p>
+  </section>
+
+  {# ---------------- copilot ---------------- #}
+  <section class="border rounded p-3 space-y-2">
+    <div class="flex items-center justify-between"><h2 class="font-semibold">Copilot reply</h2>
+      <button hx-post="/app-panel/api/conversations/{{ cid }}/draft" hx-target="#draft-box" hx-swap="outerHTML" hx-indicator="#draft-spin" class="border rounded px-2 py-0.5 text-xs">Generate draft</button></div>
+    <span id="draft-spin" class="htmx-indicator text-xs text-slate-500">Drafting from the knowledge base…</span>
+    <form hx-post="/app-panel/api/conversations/{{ cid }}/send" hx-target="#panel" hx-confirm="Send this message to the customer as you?">
+      {% with note="" %}{% include "panel/_draft.html" %}{% endwith %}
+      <div class="flex flex-wrap gap-2 mt-2">
+        <button class="bg-slate-900 text-white rounded px-3 py-1">Send as me</button>
+        <button type="button" data-action="copy" data-target="#draft" class="border rounded px-2 py-1">Copy</button>
+        {% for code, label in [("en", "English"), ("pcm", "Pidgin"), ("yo", "Yoruba")] %}
+          <button type="button" data-action="translate-draft" data-lang="{{ code }}" class="border rounded px-2 py-1 text-xs">→ {{ label }}</button>
+        {% endfor %}
+      </div>
+    </form>
+    <div class="flex flex-wrap gap-1 text-xs">
+      <span class="text-slate-500">Quick replies:</span>
+      {% for key, text in quick_replies.items() %}{% if text %}<button type="button" data-action="insert" data-text="{{ text }}" class="border rounded px-2">{{ key|capitalize }}</button>{% endif %}{% endfor %}
+    </div>
+  </section>
+
+  {# ---------------- private note ---------------- #}
+  <section class="border rounded p-3">
+    <h2 class="font-semibold mb-1">Private note</h2>
+    <form hx-post="/app-panel/api/conversations/{{ cid }}/send" hx-target="#panel" class="flex gap-2">
+      <input type="hidden" name="private" value="1">
+      <input name="content" required maxlength="4000" placeholder="Visible to agents only" class="flex-1 border rounded px-2 py-1">
+      <button class="border rounded px-3">Add note</button>
+    </form>
+  </section>
+
+  {# ---------------- contact memory ---------------- #}
+  <section class="border rounded p-3">
+    <h2 class="font-semibold mb-1">Contact memory {% if contact_name %}<span class="font-normal text-slate-500">· {{ contact_name }}</span>{% endif %}</h2>
+    <form hx-post="/app-panel/api/conversations/{{ cid }}/memory" hx-target="#panel" class="space-y-2">
+      <div class="grid grid-cols-2 gap-2">
+        <label class="text-xs">Name<input name="name" value="{{ memory.name if memory else contact_name or '' }}" class="w-full border rounded px-2 py-1 text-sm"></label>
+        <label class="text-xs">Preferred language<select name="preferred_language" class="w-full border rounded px-1 py-1 text-sm">
+          {% for code, label in [("", "auto"), ("en", "English"), ("pcm", "Pidgin"), ("yo", "Yoruba")] %}<option value="{{ code }}" {% if memory and memory.preferred_language == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select></label>
+      </div>
+      <label class="text-xs block">Preferences<textarea name="preferences" rows="2" class="w-full border rounded px-2 py-1 text-sm">{{ memory.preferences if memory else "" }}</textarea></label>
+      <label class="text-xs block">Notes<textarea name="notes" rows="2" class="w-full border rounded px-2 py-1 text-sm">{{ memory.notes if memory else "" }}</textarea></label>
+      <label class="text-xs block">Last orders (one per line, max 5)<textarea name="last_orders" rows="3" class="w-full border rounded px-2 py-1 text-sm">{% if memory %}{% for o in memory.last_orders or [] %}{{ [o.ref, o.summary, o.date]|select|join(" · ") }}
+{% endfor %}{% endif %}</textarea></label>
+      {% if memory and memory.summaries %}<details><summary class="text-xs cursor-pointer">Past conversation summaries ({{ memory.summaries|length }})</summary>
+        {% for s in memory.summaries|reverse %}<p class="text-xs mt-1"><span class="text-slate-500">{{ s.date }}:</span> {{ s.summary }}</p>{% endfor %}</details>{% endif %}
+      <button class="border rounded px-3 py-1">Save memory</button>
+    </form>
+  </section>
+
+  <p class="text-xs text-slate-400">Signed in as {{ user.email }}. <button type="button" data-action="logout" class="underline">Sign out of panel</button></p>
+</div>

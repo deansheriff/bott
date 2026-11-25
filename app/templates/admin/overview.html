@@ -1,0 +1,46 @@
+{% extends "admin/layout.html" %}
+{% set active = "overview" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Overview</h1>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+  {% for label, value in [
+    ("Open conversations", stats.open_conversations),
+    ("Bot-handled today", stats.bot_handled_today),
+    ("Handoffs today", stats.handoffs_today),
+    ("Avg bot response", (stats.avg_response_ms ~ " ms") if stats.avg_response_ms else "—")] %}
+  <div class="bg-white shadow rounded p-4"><div class="text-xs text-slate-500">{{ label }}</div><div class="text-2xl font-semibold">{{ value }}</div></div>
+  {% endfor %}
+</div>
+<div class="grid md:grid-cols-3 gap-4">
+  <section class="bg-white shadow rounded p-4">
+    <h2 class="font-semibold mb-2">LLM spend today</h2>
+    {% set pct = (100 * stats.spend_today / stats.spend_cap) if stats.spend_cap else 100 %}
+    <p class="text-sm">${{ "%.4f"|format(stats.spend_today) }} of ${{ "%.2f"|format(stats.spend_cap) }} cap</p>
+    <div class="h-2 bg-slate-200 rounded mt-2"><div class="h-2 rounded {% if pct >= 100 %}bg-red-600{% elif pct > 75 %}bg-amber-500{% else %}bg-green-600{% endif %}" style="width: {{ [pct, 100]|min }}%"></div></div>
+  </section>
+  <section class="bg-white shadow rounded p-4">
+    <h2 class="font-semibold mb-2">Webhook health (24h)</h2>
+    <ul class="text-sm space-y-1">
+      {% for k in ["accepted", "ignored", "duplicate", "rejected", "error"] %}<li>{{ k }}: <strong>{{ stats.webhooks.get(k, 0) }}</strong></li>{% endfor %}
+      <li class="text-xs text-slate-500">Last event: {{ stats.last_event.received_at|local if stats.last_event else "never" }}</li>
+      {% if stats.last_reject %}<li class="text-xs text-red-700">Last rejection: {{ stats.last_reject.reason }} at {{ stats.last_reject.received_at|local }}</li>{% endif %}
+    </ul>
+  </section>
+  <section class="bg-white shadow rounded p-4">
+    <h2 class="font-semibold mb-2">Global bot switch</h2>
+    <p class="text-sm mb-3">Current: <strong>{{ bot_switch }}</strong></p>
+    {% if can("bot_switch") %}
+    <div class="flex gap-2">
+      {% for v, desc in [("ON", "The bot answers customers."), ("PAUSED", "The bot does nothing; conversations stay pending."), ("OFF", "The bot does not answer and sends every new message straight to humans (status open).")] %}
+      <form method="post" action="/admin/bot-switch" data-confirm="Set the bot to {{ v }}? {{ desc }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="value" value="{{ v }}">
+        <button class="px-3 py-1 rounded text-sm border {% if bot_switch == v %}bg-slate-900 text-white{% endif %}">{{ v }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% else %}<p class="text-xs text-slate-500">Only admins can change the switch.</p>{% endif %}
+    <p class="text-xs text-slate-500 mt-3">Knowledge index: {{ stats.chunks }} chunks.</p>
+  </section>
+</div>
+{% endblock %}

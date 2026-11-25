@@ -1,0 +1,16 @@
+{% extends "admin/layout.html" %}
+{% set active = "playground" %}
+{% block title %}Playground{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-2">Playground</h1>
+<p class="text-sm text-slate-600 mb-4">Test the bot against the current knowledge base, menu, zones and hours. Nothing is sent to Chatwoot. LLM calls here count toward the daily spend cap.</p>
+<form hx-post="/admin/playground/run" hx-target="#result" hx-indicator="#spin" class="bg-white shadow rounded p-4 space-y-2">
+  <textarea name="message" rows="3" required maxlength="2000" placeholder="e.g. Do you deliver to Lekki? How much is jollof rice?" class="w-full border rounded p-2 text-sm"></textarea>
+  <div class="flex gap-2 items-center">
+    <input name="phone" placeholder="Simulated customer phone (optional)" class="border rounded px-2 py-1 text-sm">
+    <button class="bg-slate-900 text-white rounded px-4 py-1 text-sm">Run</button>
+    <span id="spin" class="htmx-indicator text-sm text-slate-500">Thinking…</span>
+  </div>
+</form>
+<div id="result" class="mt-4"></div>
+{% endblock %}

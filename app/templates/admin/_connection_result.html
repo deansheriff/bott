@@ -1,0 +1,6 @@
+<ul class="text-sm space-y-1">
+  <li>API base URL: <code>{{ r.base_url }}</code></li>
+  <li>Reachable: {% if r.reachable %}<span class="text-green-700">yes</span> (HTTP {{ r.reachable_status }}{% if r.version %}, Chatwoot {{ r.version }}{% endif %}){% else %}<span class="text-red-700">no</span>{% endif %}</li>
+  {% if r.bot_token_status is defined %}<li>Bot token: {% if r.bot_token_ok %}<span class="text-green-700">accepted</span>{% else %}<span class="text-red-700">rejected</span>{% endif %} (HTTP {{ r.bot_token_status }})</li>{% endif %}
+  {% if r.error %}<li class="text-red-700">Error: {{ r.error }}</li>{% endif %}
+</ul>

@@ -1,0 +1,31 @@
+{% extends "admin/layout.html" %}
+{% set active = "analytics" %}
+{% block title %}Analytics{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-2xl font-semibold">Analytics · last {{ a.days }} days</h1>
+  <form method="get" class="text-sm flex gap-2"><select name="days" class="border rounded px-1">{% for d in [7, 30, 90] %}<option value="{{ d }}" {% if d == a.days %}selected{% endif %}>{{ d }} days</option>{% endfor %}</select><button class="border rounded px-2">Apply</button></form>
+</div>
+<div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+  {% for label, value in [("Incoming messages", a.totals.messages), ("Bot turns", a.totals.turns), ("Handoffs", a.totals.handoffs), ("Handoff rate", "%.0f%%"|format(100 * a.totals.handoff_rate)), ("LLM cost", "$%.2f"|format(a.totals.cost))] %}
+  <div class="bg-white shadow rounded p-3"><div class="text-xs text-slate-500">{{ label }}</div><div class="text-xl font-semibold">{{ value }}</div></div>
+  {% endfor %}
+</div>
+<div class="grid md:grid-cols-2 gap-4">
+  <section class="bg-white shadow rounded p-4">
+    <div class="flex justify-between mb-2"><h2 class="font-semibold">By day</h2><a class="text-sm underline" href="/admin/analytics/export.csv?report=daily&days={{ a.days }}">CSV</a></div>
+    <table class="w-full text-sm"><thead class="text-left text-slate-500"><tr><th>Day</th><th>Msgs</th><th>Turns</th><th>Handoff %</th><th>Cost</th></tr></thead>
+    {% for r in a.daily %}<tr class="border-t"><td>{{ r.day }}</td><td>{{ r.messages }}</td><td>{{ r.turns }}</td><td>{{ "%.0f"|format(100 * r.handoff_rate) }}%</td><td>${{ "%.3f"|format(r.cost) }}</td></tr>
+    {% else %}<tr><td colspan="5" class="text-slate-500">No data yet.</td></tr>{% endfor %}</table>
+  </section>
+  <section class="bg-white shadow rounded p-4">
+    <div class="flex justify-between mb-2"><h2 class="font-semibold">Top unanswered questions</h2><a class="text-sm underline" href="/admin/analytics/export.csv?report=unanswered&days={{ a.days }}">CSV</a></div>
+    <p class="text-xs text-slate-500 mb-2">Questions the bot handed off because the knowledge base didn't cover them. Use these to fill gaps.</p>
+    <table class="w-full text-sm">{% for q, n in a.unanswered %}<tr class="border-t"><td class="py-1">{{ q }}</td><td class="text-right">{{ n }}</td></tr>{% else %}<tr><td class="text-slate-500">None.</td></tr>{% endfor %}</table>
+  </section>
+  <section class="bg-white shadow rounded p-4">
+    <div class="flex justify-between mb-2"><h2 class="font-semibold">Top menu items asked about</h2><a class="text-sm underline" href="/admin/analytics/export.csv?report=menu&days={{ a.days }}">CSV</a></div>
+    <table class="w-full text-sm">{% for q, n in a.menu %}<tr class="border-t"><td class="py-1">{{ q }}</td><td class="text-right">{{ n }}</td></tr>{% else %}<tr><td class="text-slate-500">None.</td></tr>{% endfor %}</table>
+  </section>
+</div>
+{% endblock %}
