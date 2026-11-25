@@ -39,10 +39,13 @@ RED_FLAG_CATEGORIES = {"refund", "allergy", "complaint", "food_poisoning", "lega
 
 
 def defaults() -> dict[str, Any]:
+    from .llm import resolve_model
+
     s = get_settings()
     return {
         "bot_switch": "ON",
-        "llm_model": s.llm_model,
+        "llm_provider": s.llm_provider,
+        "llm_model": resolve_model(s.llm_provider, s.llm_model),
         "daily_spend_cap_usd": float(s.daily_llm_spend_cap_usd),
         "timezone": s.timezone,
         "greeting": f"Hi! I'm the virtual assistant for {s.restaurant_name}.",

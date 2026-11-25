@@ -45,7 +45,7 @@ from ..services.handoff import post_answer_check, pre_answer_check
 from ..services.hours import DAY_NAMES, opening_status, valid_hhmm
 from ..services.importer import ImportErrorUser, convert_upload, suggest_filename
 from ..services.knowledge import FILENAME_RE, get_kb, render_markdown_safe, save_version, unified_diff
-from ..services.llm import LLMError
+from ..services.llm import DEFAULT_MODELS, PROVIDERS, LLMError, key_configured, model_matches
 from ..services.spend import SpendCapReached, local_day_bounds_utc, spend_today
 from ..templating import render
 from ..utils import csv_safe, is_valid_tz, random_token, safe_tz, sha256_hex, utcnow
@@ -571,9 +571,16 @@ def analytics_export(report: str = "daily", days: int = 30, auth: Auth = Depends
 
 
 # ================================================================== settings
+def _provider_info() -> list[dict]:
+    names = [p for p in PROVIDERS if p != "fake" or not get_settings().is_production]
+    labels = {"openai": "OpenAI", "gemini": "Google Gemini", "fake": "Fake (offline testing)"}
+    keys = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "fake": ""}
+    return [{"id": n, "label": labels[n], "default_model": DEFAULT_MODELS[n], "key_env": keys[n], "key_ok": key_configured(n)} for n in names]
+
+
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, auth: Auth = Depends(require("settings")), db: Session = Depends(get_db)):
-    return render(request, "admin/settings.html", {"s": settings_store.all_settings(db), "errors": [], "flash": ""}, auth=auth, db=db)
+    return render(request, "admin/settings.html", {"s": settings_store.all_settings(db), "errors": [], "flash": "", "providers": _provider_info()}, auth=auth, db=db)
 
 
 def _parse_keywords(text: str) -> dict[str, list[str]] | None:
@@ -594,7 +601,8 @@ def _parse_keywords(text: str) -> dict[str, list[str]] | None:
 @router.post("/settings", response_class=HTMLResponse)
 def settings_save(
     request: Request,
-    llm_model: str = Form(...),
+    llm_provider: str = Form("openai"),
+    llm_model: str = Form(""),
     daily_spend_cap_usd: str = Form(...),
     timezone_name: str = Form(...),
     greeting: str = Form(""),
@@ -613,9 +621,17 @@ def settings_save(
 ):
     errors = []
     new: dict = {}
-    if not re.fullmatch(r"[A-Za-z0-9._:-]{2,64}", llm_model.strip()):
+    allowed_providers = [p for p in PROVIDERS if p != "fake" or not get_settings().is_production]
+    provider = llm_provider.strip().lower()
+    model = llm_model.strip() or DEFAULT_MODELS.get(provider, "")
+    if provider not in allowed_providers:
+        errors.append("Choose OpenAI or Gemini as the AI provider.")
+    elif not re.fullmatch(r"[A-Za-z0-9._:-]{2,64}", model):
         errors.append("Model name is invalid.")
-    new["llm_model"] = llm_model.strip()
+    elif not model_matches(provider, model):
+        errors.append(f"Model {model!r} doesn't belong to {provider}. Leave it empty to use {DEFAULT_MODELS.get(provider)}.")
+    new["llm_provider"] = provider
+    new["llm_model"] = model
     try:
         cap = float(daily_spend_cap_usd)
         assert 0 <= cap <= 10_000
@@ -646,13 +662,13 @@ def settings_save(
     except (ValueError, AssertionError):
         errors.append('Price overrides must be JSON like {"gpt-4o-mini": [0.15, 0.6]}.')
     if errors:
-        return render(request, "admin/settings.html", {"s": {**settings_store.all_settings(db), **new}, "errors": errors, "flash": ""}, auth=auth, db=db, status_code=400)
+        return render(request, "admin/settings.html", {"s": {**settings_store.all_settings(db), **new}, "errors": errors, "flash": "", "providers": _provider_info()}, auth=auth, db=db, status_code=400)
     for key, value in new.items():
         before, after = settings_store.set_setting(db, key, value)
         if before != after:
             audit.record(db, auth.user, "settings.update", "setting", key, before, after, auth.ip)
     db.commit()
-    return render(request, "admin/settings.html", {"s": settings_store.all_settings(db), "errors": [], "flash": "Settings saved."}, auth=auth, db=db)
+    return render(request, "admin/settings.html", {"s": settings_store.all_settings(db), "errors": [], "flash": "Settings saved.", "providers": _provider_info()}, auth=auth, db=db)
 
 
 @router.post("/settings/test-connection", response_class=HTMLResponse)

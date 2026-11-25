@@ -19,7 +19,7 @@ class OpenAIProvider(LLMProvider):
     @staticmethod
     def _to_wire(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
-        for m in messages:
+        for m in messages:  # m["raw"] is ignored: OpenAI needs nothing extra between turns
             role = m["role"]
             if role == "assistant" and m.get("tool_calls"):
                 out.append(

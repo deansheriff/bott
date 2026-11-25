@@ -177,7 +177,7 @@ def generate_answer(
         total_cost += cost
         model = resp.model
         if resp.tool_calls and allow_tools:
-            messages.append({"role": "assistant", "content": resp.content, "tool_calls": resp.tool_calls})
+            messages.append({"role": "assistant", "content": resp.content, "tool_calls": resp.tool_calls, "raw": resp.raw})
             for tc in resp.tool_calls:
                 output = run_tool(ctx, tc.name, tc.arguments)
                 tool_records.append({"name": tc.name, "args": tc.arguments, "output": output})

@@ -7,7 +7,16 @@
 {% for e in errors %}<p class="mb-2 text-sm bg-red-50 text-red-700 p-2 rounded">{{ e }}</p>{% endfor %}
 <form method="post" action="/admin/settings" class="bg-white shadow rounded p-4 grid md:grid-cols-2 gap-4 text-sm">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label>LLM model<input name="llm_model" value="{{ s.llm_model }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  <label>AI provider
+    <select name="llm_provider" class="mt-1 w-full border rounded px-2 py-1">
+      {% for p in providers %}<option value="{{ p.id }}" {% if s.llm_provider == p.id %}selected{% endif %}>{{ p.label }}{% if not p.key_ok %} (no API key set){% endif %}</option>{% endfor %}
+    </select>
+    <span class="block text-xs text-slate-500 mt-1">{% for p in providers if p.key_env %}{{ p.key_env }}: {% if p.key_ok %}<span class="text-green-700">set</span>{% else %}<span class="text-red-700">missing</span>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}. Keys are set in Coolify, not here.</span>
+  </label>
+  <label>Model
+    <input name="llm_model" value="{{ s.llm_model }}" class="mt-1 w-full border rounded px-2 py-1">
+    <span class="block text-xs text-slate-500 mt-1">Leave empty for the provider default ({% for p in providers %}{{ p.label }}: {{ p.default_model }}{% if not loop.last %}, {% endif %}{% endfor %}). Switching provider? Change or clear the model too.</span>
+  </label>
   <label>Daily LLM spend cap (USD)<input name="daily_spend_cap_usd" value="{{ s.daily_spend_cap_usd }}" inputmode="decimal" class="mt-1 w-full border rounded px-2 py-1"></label>
   <label>Timezone (IANA)<input name="timezone_name" value="{{ s.timezone }}" class="mt-1 w-full border rounded px-2 py-1"></label>
   <label>Currency symbol<input name="currency_symbol" value="{{ s.currency_symbol }}" class="mt-1 w-full border rounded px-2 py-1"></label>

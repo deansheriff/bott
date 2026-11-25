@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..models import LLMUsage
 from ..utils import safe_tz
 from . import settings_store
-from .llm import LLMProvider, LLMResponse, ToolSpec, get_provider
+from .llm import LLMProvider, LLMResponse, ToolSpec, get_provider, resolve_model
 from .llm.pricing import cost_usd
 
 log = logging.getLogger(__name__)
@@ -54,8 +54,9 @@ def tracked_complete(
     """Call the LLM if the cap allows, record usage and cost. Returns (response, cost_usd)."""
     if cap_reached(db):
         raise SpendCapReached()
-    provider = provider or get_provider()
-    model = settings_store.get_setting(db, "llm_model")
+    provider_name = settings_store.get_setting(db, "llm_provider")
+    provider = provider or get_provider(provider_name)
+    model = resolve_model(provider_name, settings_store.get_setting(db, "llm_model"))
     resp = provider.complete(messages, model=model, tools=tools, json_mode=json_mode, max_tokens=max_tokens)
     cost = cost_usd(resp.model or model, resp.input_tokens, resp.output_tokens, settings_store.get_setting(db, "llm_price_overrides"))
     db.add(

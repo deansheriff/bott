@@ -41,6 +41,16 @@ A FastAPI service that answers restaurant customers in Chatwoot, hands off to hu
 
 This reconciles two lines of the spec: "do nothing" in the webhook section and "OFF sends all new conversations to humans" on the Overview page.
 
+## AI provider: OpenAI or Gemini
+
+The bot works with **OpenAI** or **Google Gemini**. Pick one with `LLM_PROVIDER` (`openai` or `gemini`) and set that provider's key: `OPENAI_API_KEY`, or `GEMINI_API_KEY` from https://aistudio.google.com/apikey.
+
+You can switch later on **Settings → AI provider** without redeploying, as long as both keys are set in Coolify. The page shows which keys are present. Leave **Model** empty to use the provider default:
+- OpenAI: `gpt-4o-mini`
+- Gemini: `gemini-3.5-flash-lite`, Google's recommended fast, low-cost model for new projects. Avoid `gemini-2.5-flash` and `gemini-2.5-pro`: Google shuts them down on 1 December 2026.
+
+Both providers use the same tools, the same rules (prices only from the menu table), the same price check and the same spend cap. Gemini's thinking tokens are counted as output in the cost.
+
 ## Knowledge documents and suggested replies
 
 The bot and Copilot answer from the Markdown files on **Knowledge** (`/admin/knowledge`). You can write them there, or **import a document**:
@@ -95,12 +105,12 @@ app/
     spend.py            LLM usage, cost, daily cap
     settings_store.py   runtime settings (DB) with env defaults
     audit.py            audit log writer
-    llm/                LLMProvider interface, OpenAI adapter, fake provider, pricing
+    llm/                LLMProvider interface, OpenAI + Gemini adapters, fake provider, pricing
   routers/              webhooks, panel, admin_auth, admin_pages, copilot, health
   templates/            admin/*, panel/*
   static/               panel.js (postMessage + auth), admin.js, app.css
 knowledge/*.md          placeholder knowledge (copied into the volume on first boot)
-tests/                  pytest suite (81 tests)
+tests/                  pytest suite (92 tests)
 Dockerfile, docker-entrypoint.sh, docker-compose.yml, .env.example
 ```
 
@@ -121,7 +131,7 @@ Edit `.env` and set:
 - `COOKIE_SECURE=false`
 - `SESSION_SECRET`
 - `DASHBOARD_ADMIN_EMAIL` and `DASHBOARD_ADMIN_PASSWORD`
-- `OPENAI_API_KEY`, or `LLM_PROVIDER=fake` to work offline
+- `LLM_PROVIDER=openai` with `OPENAI_API_KEY`, or `LLM_PROVIDER=gemini` with `GEMINI_API_KEY`, or `LLM_PROVIDER=fake` to work offline
 - optionally `SEED_DEMO_DATA=true` for a sample menu, zones and hours
 
 Then run:
@@ -147,6 +157,7 @@ To exercise the webhook locally, expose the port with a tunnel and point a test 
 | `test_retriever.py` | Heading-aware chunking, BM25 ranking, empty results, swappable retriever, reindex, filename/path safety |
 | `test_dashboard_auth.py` | Login, cookie flags, forced password change, roles, lockout, idle/absolute timeouts, forged cookies, open-redirect guard, frame headers, the panel link flow, single-use nonce, bearer-only panel, agent token used for sends, Chatwoot access check |
 | `test_import.py` | DOCX headings/lists/tables/FAQ questions, PDF text extraction, scanned-PDF rejection, type detection by content, size limit, zip-bomb and non-Word zip rejection, review-before-save, CSRF and role checks, prices in documents not trusted |
+| `test_gemini.py` | Gemini message mapping (system, merged turns, grouped tool results), thought signatures resent, tool schemas, thinking tokens billed, errors, provider/model switching, a full tool-call round trip, Settings validation |
 | `test_csrf.py` | Missing, wrong and cross-session tokens, Origin check, HTMX header token, login-form CSRF, panel CSRF header, `/copilot/translate` CSRF |
 
 ## Deploying on Coolify
@@ -225,7 +236,8 @@ I read the Chatwoot webhook and agent-bot guides, the Dashboard Apps guide (date
 7. **Message history**: `GET …/messages` doesn't list bot auth, so history comes from the local transcript. Conversations that started before the bot was deployed will lack earlier context.
 8. **Connection test**: uses `GET /api` for reachability and expects 404 vs 401 on a non-existent conversation to check the bot token. Both are reasonable guesses, not documented contracts.
 9. **Coolify**: the `https://domain:8000` port syntax and the predefined-network option follow Coolify's usual behaviour. Confirm them in your Coolify version.
-10. **LLM prices** in `app/services/llm/pricing.py` are defaults; check current OpenAI pricing or override them in Settings.
+10. **LLM prices** in `app/services/llm/pricing.py` are defaults; check current OpenAI and Gemini pricing or override them in Settings. Gemini prices were read from Google's pricing page on 2026-11-25; where Google announced a rise, the higher price is used.
+11. **Gemini function calling with a JSON response format** isn't documented as supported together, so with tools the bot asks for JSON in the prompt and parses it from the text. If a model wraps JSON oddly, replies hand off rather than send.
 
 ## Open decisions (choices I made without changing your security model or Chatwoot setup)
 

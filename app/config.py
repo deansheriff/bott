@@ -28,9 +28,10 @@ class Settings(BaseSettings):
     chatwoot_webhook_secret: str = ""
 
     # LLM
-    llm_provider: str = "openai"
+    llm_provider: str = "openai"  # openai | gemini (runtime-switchable in /admin/settings)
     openai_api_key: str = ""
-    llm_model: str = "gpt-4o-mini"
+    gemini_api_key: str = ""
+    llm_model: str = ""  # empty = provider default (gpt-4o-mini / gemini-3.5-flash-lite)
     daily_llm_spend_cap_usd: float = 5.0
 
     # Storage
