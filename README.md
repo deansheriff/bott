@@ -41,6 +41,30 @@ A FastAPI service that answers restaurant customers in Chatwoot, hands off to hu
 
 This reconciles two lines of the spec: "do nothing" in the webhook section and "OFF sends all new conversations to humans" on the Overview page.
 
+## Testing the copilot without Chatwoot: Simulate handoff
+
+On **Playground → Simulate handoff** (admin only):
+
+1. Write a short conversation, one message per line, starting with `Customer:` or `Bot:` (`C:` / `B:` also work). The last line must be from the customer.
+
+   ```
+   Customer: Hi, do you deliver to Lekki?
+   Bot: Yes, we deliver to Lekki Phase 1.
+   Customer: My order came cold and I want a refund
+   ```
+2. Optionally add a customer name and phone; the phone is used for order lookups.
+3. Choose **Use the bot's real rules**, or **Always show a handoff** to see the copilot output even when the bot would have answered by itself.
+
+The result shows exactly what would happen in Chatwoot:
+- the message to the customer;
+- the status change to open;
+- the private summary note (3 lines, the customer's question and the escalation reason, with 🚩 for refund, allergy or complaint);
+- the suggested-reply note.
+
+A **Why** section shows the knowledge sections and tool calls used.
+
+It runs the same code as the live bot, so the same keywords, turn limit (counted from the `Bot:` lines), confidence threshold, price check and spend cap apply. Nothing is sent to Chatwoot. The AI calls are real and count toward the daily cap.
+
 ## AI provider: OpenAI or Gemini
 
 The bot works with **OpenAI** or **Google Gemini**. Pick one with `LLM_PROVIDER` (`openai` or `gemini`) and set that provider's key: `OPENAI_API_KEY`, or `GEMINI_API_KEY` from https://aistudio.google.com/apikey.
@@ -100,6 +124,7 @@ app/
     retriever.py        Retriever interface + BM25
     knowledge.py        knowledge files, versions, sanitised Markdown preview
     importer.py         PDF / DOCX / TXT / MD upload -> Markdown (with safety checks)
+    simulate.py         Playground "Simulate handoff" (same code path as the live bot)
     hours.py            opening status with overnight spans and date overrides
     chatwoot.py         Chatwoot API client
     spend.py            LLM usage, cost, daily cap
@@ -110,7 +135,7 @@ app/
   templates/            admin/*, panel/*
   static/               panel.js (postMessage + auth), admin.js, app.css
 knowledge/*.md          placeholder knowledge (copied into the volume on first boot)
-tests/                  pytest suite (92 tests)
+tests/                  pytest suite (102 tests)
 Dockerfile, docker-entrypoint.sh, docker-compose.yml, .env.example
 ```
 
@@ -158,6 +183,7 @@ To exercise the webhook locally, expose the port with a tunnel and point a test 
 | `test_dashboard_auth.py` | Login, cookie flags, forced password change, roles, lockout, idle/absolute timeouts, forged cookies, open-redirect guard, frame headers, the panel link flow, single-use nonce, bearer-only panel, agent token used for sends, Chatwoot access check |
 | `test_import.py` | DOCX headings/lists/tables/FAQ questions, PDF text extraction, scanned-PDF rejection, type detection by content, size limit, zip-bomb and non-Word zip rejection, review-before-save, CSRF and role checks, prices in documents not trusted |
 | `test_gemini.py` | Gemini message mapping (system, merged turns, grouped tool results), thought signatures resent, tool schemas, thinking tokens billed, errors, provider/model switching, a full tool-call round trip, Settings validation |
+| `test_simulate.py` | Transcript parsing, a refund handoff showing summary and suggestion with no Chatwoot calls, the greeting on a direct reply, forced handoff, turn limit from bot lines, spend-cap fallback, escaping, CSRF and admin-only access |
 | `test_csrf.py` | Missing, wrong and cross-session tokens, Origin check, HTMX header token, login-form CSRF, panel CSRF header, `/copilot/translate` CSRF |
 
 ## Deploying on Coolify

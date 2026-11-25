@@ -1,0 +1,40 @@
+<div class="bg-white shadow rounded p-4 space-y-4 text-sm">
+  {% if error %}<p class="text-red-700">{{ error }}</p>{% endif %}
+  {% if r %}
+    {% if r.handed_off %}
+      <p class="p-2 rounded {% if r.decision.red_flag %}bg-red-50 text-red-800{% else %}bg-amber-50 text-amber-900{% endif %}">
+        {% if r.decision.red_flag %}🚩 {% endif %}<strong>Hands off to a human</strong> · {{ r.decision.reason }} <span class="text-xs">({{ r.decision.category }})</span></p>
+    {% else %}
+      <p class="p-2 rounded bg-green-50 text-green-800"><strong>The bot answers by itself</strong>. No handoff. Choose “Always show a handoff” to see the copilot output anyway.</p>
+    {% endif %}
+    {% for n in r.notes %}<p class="text-xs text-slate-600">{{ n }}</p>{% endfor %}
+
+    <div>
+      <h3 class="font-semibold mb-1">What happens in Chatwoot</h3>
+      <ol class="space-y-2">
+        {% if r.handed_off %}
+          <li class="border rounded p-2"><div class="text-xs text-slate-500">1 · Message to the customer (visible to them)</div><p class="whitespace-pre-wrap bg-blue-50 rounded p-2 mt-1">{{ r.customer_message }}</p></li>
+          <li class="border rounded p-2"><div class="text-xs text-slate-500">2 · Conversation status set to <strong>open</strong>; the bot stays silent until someone sets it back to pending</div></li>
+          <li class="border rounded p-2"><div class="text-xs text-slate-500">3 · Private note for agents (summary)</div><pre class="whitespace-pre-wrap bg-yellow-50 rounded p-2 mt-1 font-sans">{{ r.handoff_note }}</pre></li>
+          <li class="border rounded p-2"><div class="text-xs text-slate-500">4 · Private note for agents (suggested reply)</div>
+            {% if r.suggestion_note %}<pre class="whitespace-pre-wrap bg-yellow-50 rounded p-2 mt-1 font-sans">{{ r.suggestion_note }}</pre>
+            {% else %}<p class="text-slate-500 mt-1">Not posted: no grounded suggestion.</p>{% endif %}</li>
+        {% else %}
+          <li class="border rounded p-2"><div class="text-xs text-slate-500">Bot reply to the customer{% if r.answer %} · confidence {{ "%.2f"|format(r.answer.confidence) }}{% endif %}</div><p class="whitespace-pre-wrap bg-blue-50 rounded p-2 mt-1">{{ r.reply_sent }}</p></li>
+        {% endif %}
+      </ol>
+    </div>
+
+    {% if r.answer %}
+      <details><summary class="font-semibold cursor-pointer">Why: knowledge used ({{ r.answer.chunks|length }}) and tool calls ({{ r.answer.tool_calls|length }})</summary>
+        <p class="text-xs text-slate-500 mt-1">Model confidence {{ "%.2f"|format(r.answer.confidence) }} · reason: {{ r.answer.reason or "—" }} · cost ${{ "%.5f"|format(r.answer.cost_usd) }}</p>
+        {% if r.answer.unverified_amounts %}<p class="text-xs text-red-700">Prices not from tools: {{ r.answer.unverified_amounts|join(", ") }}</p>{% endif %}
+        {% for c in r.answer.chunks %}<div class="border rounded p-2 mt-1"><div class="text-xs text-slate-500">{{ c.chunk.source }} › {{ c.chunk.heading }} · score {{ "%.2f"|format(c.score) }}</div><pre class="whitespace-pre-wrap text-xs">{{ c.chunk.text }}</pre></div>{% endfor %}
+        {% for t in r.answer.tool_calls %}<div class="border rounded p-2 mt-1"><div class="font-mono text-xs">{{ t.name }}({{ t.args|tojson }})</div><pre class="whitespace-pre-wrap text-xs text-slate-600">{{ t.output|tojson(indent=2) }}</pre></div>{% endfor %}
+      </details>
+    {% elif r.handed_off %}
+      <p class="text-xs text-slate-500">The rules handed off before asking the AI ({{ r.decision.category|replace("_", " ") }}), so there's no model answer to inspect.</p>
+    {% endif %}
+    <p class="text-xs text-slate-400">Simulated: {{ r.history|length }} earlier message(s), {{ r.bot_turns }} bot turn(s). Nothing was sent to Chatwoot.</p>
+  {% endif %}
+</div>

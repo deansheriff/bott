@@ -44,6 +44,7 @@ from ..services.chatwoot import connection_test
 from ..services.handoff import post_answer_check, pre_answer_check
 from ..services.hours import DAY_NAMES, opening_status, valid_hhmm
 from ..services.importer import ImportErrorUser, convert_upload, suggest_filename
+from ..services.simulate import TranscriptError, simulate
 from ..services.knowledge import FILENAME_RE, get_kb, render_markdown_safe, save_version, unified_diff
 from ..services.llm import DEFAULT_MODELS, PROVIDERS, LLMError, key_configured, model_matches
 from ..services.spend import SpendCapReached, local_day_bounds_utc, spend_today
@@ -502,6 +503,24 @@ def playground_run(request: Request, message: str = Form(""), phone: str = Form(
     turn.handoff = decision is not None
     db.commit()
     return render(request, "admin/_playground_result.html", ctx, auth=auth)
+
+
+@router.post("/playground/simulate", response_class=HTMLResponse)
+def playground_simulate(
+    request: Request,
+    transcript: str = Form(""),
+    phone: str = Form(""),
+    contact_name: str = Form(""),
+    mode: str = Form("auto"),
+    auth: Auth = Depends(require("playground")),
+    db: Session = Depends(get_db),
+):
+    """Show the exact customer message and private notes a handoff would produce. Nothing is sent to Chatwoot."""
+    try:
+        result = simulate(db, transcript, phone=phone.strip()[:32] or None, contact_name=contact_name.strip()[:100], force_handoff=mode == "force")
+    except TranscriptError as exc:
+        return render(request, "admin/_handoff_result.html", {"r": None, "error": str(exc)}, auth=auth)
+    return render(request, "admin/_handoff_result.html", {"r": result, "error": ""}, auth=auth)
 
 
 # ================================================================== analytics

@@ -3,14 +3,40 @@
 {% block title %}Playground{% endblock %}
 {% block content %}
 <h1 class="text-2xl font-semibold mb-2">Playground</h1>
-<p class="text-sm text-slate-600 mb-4">Test the bot against the current knowledge base, menu, zones and hours. Nothing is sent to Chatwoot. LLM calls here count toward the daily spend cap.</p>
-<form hx-post="/admin/playground/run" hx-target="#result" hx-indicator="#spin" class="bg-white shadow rounded p-4 space-y-2">
-  <textarea name="message" rows="3" required maxlength="2000" placeholder="e.g. Do you deliver to Lekki? How much is jollof rice?" class="w-full border rounded p-2 text-sm"></textarea>
-  <div class="flex gap-2 items-center">
-    <input name="phone" placeholder="Simulated customer phone (optional)" class="border rounded px-2 py-1 text-sm">
-    <button class="bg-slate-900 text-white rounded px-4 py-1 text-sm">Run</button>
-    <span id="spin" class="htmx-indicator text-sm text-slate-500">Thinking…</span>
-  </div>
-</form>
-<div id="result" class="mt-4"></div>
+<p class="text-sm text-slate-600 mb-4">Test the bot against the current knowledge base, menu, zones and hours. Nothing is sent to Chatwoot. AI calls here are real and count toward the daily spend cap.</p>
+
+<section class="mb-8">
+  <h2 class="font-semibold mb-2">Single message</h2>
+  <form hx-post="/admin/playground/run" hx-target="#result" hx-indicator="#spin" class="bg-white shadow rounded p-4 space-y-2">
+    <textarea name="message" rows="3" required maxlength="2000" placeholder="e.g. Do you deliver to Lekki? How much is jollof rice?" class="w-full border rounded p-2 text-sm"></textarea>
+    <div class="flex gap-2 items-center">
+      <input name="phone" placeholder="Simulated customer phone (optional)" class="border rounded px-2 py-1 text-sm">
+      <button class="bg-slate-900 text-white rounded px-4 py-1 text-sm">Run</button>
+      <span id="spin" class="htmx-indicator text-sm text-slate-500">Thinking…</span>
+    </div>
+  </form>
+  <div id="result" class="mt-4"></div>
+</section>
+
+<section>
+  <h2 class="font-semibold mb-1">Simulate handoff</h2>
+  <p class="text-sm text-slate-600 mb-2">Write a short conversation. The last line must be from the customer. You'll see exactly what the bot would do: the reply it would send, or the holding message, the 3-line summary note and the suggested reply an agent would get.</p>
+  <form hx-post="/admin/playground/simulate" hx-target="#sim-result" hx-indicator="#sim-spin" class="bg-white shadow rounded p-4 space-y-2">
+    <textarea name="transcript" rows="8" required maxlength="8000" class="w-full border rounded p-2 text-sm font-mono" placeholder="Customer: Hi, do you deliver to Lekki?
+Bot: Yes, we deliver to Lekki Phase 1.
+Customer: My order came cold and I want a refund"></textarea>
+    <p class="text-xs text-slate-500">Start each line with <code>Customer:</code> or <code>Bot:</code> (<code>C:</code> / <code>B:</code> also work). Lines without a prefix continue the previous message.</p>
+    <div class="flex flex-wrap gap-2 items-center text-sm">
+      <input name="contact_name" maxlength="100" placeholder="Customer name (optional)" class="border rounded px-2 py-1">
+      <input name="phone" maxlength="32" placeholder="Customer phone (optional)" class="border rounded px-2 py-1">
+      <select name="mode" class="border rounded px-2 py-1">
+        <option value="auto">Use the bot's real rules</option>
+        <option value="force">Always show a handoff</option>
+      </select>
+      <button class="bg-slate-900 text-white rounded px-4 py-1">Simulate</button>
+      <span id="sim-spin" class="htmx-indicator text-slate-500">Running the bot, summary and copilot…</span>
+    </div>
+  </form>
+  <div id="sim-result" class="mt-4"></div>
+</section>
 {% endblock %}

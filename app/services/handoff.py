@@ -80,6 +80,10 @@ def build_handoff_note(summary_lines: list[str], question: str, decision: Handof
     )
 
 
+def build_suggestion_note(suggested_reply: str) -> str:
+    return f"💡 Suggested reply (drafted from the knowledge base; review before sending):\n{suggested_reply}"
+
+
 def perform_handoff(
     db: Session,
     client: ChatwootClient,
@@ -97,7 +101,7 @@ def perform_handoff(
     client.toggle_status(conv_id, "open")
     client.send_message(conv_id, build_handoff_note(summary_lines, question, decision), private=True)
     if suggested_reply:
-        client.send_message(conv_id, f"💡 Suggested reply (drafted from the knowledge base; review before sending):\n{suggested_reply}", private=True)
+        client.send_message(conv_id, build_suggestion_note(suggested_reply), private=True)
     state.bot_state = "handed_off"
     state.handoff_reason = truncate(decision.reason, 255)
     state.handoff_category = decision.category

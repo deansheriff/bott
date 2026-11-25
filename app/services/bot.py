@@ -195,6 +195,88 @@ def summarize_task(conversation_id: int) -> None:
         log.exception("memory.summarize_task_failed", extra={"conversation_id": conversation_id})
 
 
+# ------------------------------------------------------------------ decision (shared with the Playground)
+SPEND_CAP_REASON = "Daily LLM spend cap reached (handoff-only mode)"
+
+
+def decide_and_answer(
+    db: Session,
+    question: str,
+    history: list[dict[str, str]],
+    profile: dict,
+    *,
+    contact_phone: str | None,
+    contact_id: int | None,
+    conversation_id: int | None,
+    turns: int,
+    bot_turn_id: int | None,
+    purpose: str = "answer",
+) -> tuple[HandoffDecision | None, AnswerResult | None]:
+    """Apply every handoff rule and, if none fires first, ask the model. Returns (decision, answer)."""
+    keywords = settings_store.get_setting(db, "handoff_keywords")
+    phrases = settings_store.get_setting(db, "human_request_phrases")
+    max_turns = int(settings_store.get_setting(db, "max_bot_turns"))
+    threshold = float(settings_store.get_setting(db, "confidence_threshold"))
+
+    if cap_reached(db):
+        return HandoffDecision(SPEND_CAP_REASON, "spend_cap"), None
+    decision = pre_answer_check(question, turns, max_turns, keywords, phrases)
+    if decision is not None:
+        return decision, None
+    try:
+        answer = generate_answer(db, question, history, profile, contact_phone=contact_phone, contact_id=contact_id, conversation_id=conversation_id, bot_turn_id=bot_turn_id, purpose=purpose)
+    except SpendCapReached:
+        return HandoffDecision(SPEND_CAP_REASON, "spend_cap"), None
+    except LLMError as exc:
+        return HandoffDecision(f"LLM unavailable ({exc})", "error"), None
+    return post_answer_check(answer.confidence, answer.needs_human, answer.answered_from_knowledge, answer.unverified_amounts, threshold, answer.reason), answer
+
+
+def apply_greeting(db: Session, reply: str, turns: int, history: list[dict[str, str]]) -> str:
+    """The configured greeting is prefixed to the bot's first reply in a conversation."""
+    greeting = (settings_store.get_setting(db, "greeting") or "").strip()
+    if greeting and turns == 0 and not any(h["role"] == "assistant" for h in history):
+        return f"{greeting}\n\n{reply}"
+    return reply
+
+
+def record_answer(turn: BotTurn, answer: AnswerResult) -> None:
+    turn.confidence, turn.chunks, turn.cost_usd, turn.model = answer.confidence, [c.as_dict() for c in answer.chunks], answer.cost_usd, answer.model
+    turn.tool_calls = [{"name": t["name"], "args": t["args"], "output": t["output"]} for t in answer.tool_calls]
+
+
+def prepare_handoff(
+    db: Session,
+    decision: HandoffDecision,
+    answer: AnswerResult | None,
+    history: list[dict[str, str]],
+    question: str,
+    profile: dict,
+    *,
+    contact_phone: str | None,
+    contact_id: int | None,
+    conversation_id: int | None,
+    contact_name: str,
+    turns: int,
+) -> tuple[list[str], str | None]:
+    """Build the copilot output for a handoff: (3 summary lines, suggested reply or None)."""
+    summary_lines = None
+    suggestion = None
+    if decision.category not in ("spend_cap", "error", "bot_off"):
+        try:
+            summary_lines = summarize_for_handoff(db, history, question, conversation_id)
+        except (SpendCapReached, LLMError):
+            pass
+        try:
+            if answer is not None and answer.answered_from_knowledge and answer.reply and not answer.unverified_amounts:
+                suggestion = answer.reply  # already grounded; no second model call
+            else:
+                suggestion, _ = draft_reply(db, question, history, profile, contact_phone, contact_id, conversation_id)
+        except (SpendCapReached, LLMError):
+            pass
+    return summary_lines or fallback_summary(contact_name, history, question, turns), suggestion or None
+
+
 # ------------------------------------------------------------------ reply pipeline
 def process_incoming(payload: dict) -> None:
     """Background task: decide, answer or hand off."""
@@ -248,33 +330,12 @@ def _process(db: Session, msg: IncomingMessage, started: float) -> None:
         turn.handoff, turn.handoff_reason, turn.handoff_category = True, "Bot switched off", "bot_off"
         return
 
-    keywords = settings_store.get_setting(db, "handoff_keywords")
-    phrases = settings_store.get_setting(db, "human_request_phrases")
-    max_turns = int(settings_store.get_setting(db, "max_bot_turns"))
-    threshold = float(settings_store.get_setting(db, "confidence_threshold"))
-
-    answer: AnswerResult | None = None
-    if cap_reached(db):
-        decision: HandoffDecision | None = HandoffDecision("Daily LLM spend cap reached (handoff-only mode)", "spend_cap")
-    else:
-        decision = pre_answer_check(msg.content, state.bot_turns, max_turns, keywords, phrases)
-    if decision is None:
-        try:
-            answer = generate_answer(db, msg.content, history, profile, contact_phone=msg.contact_phone, contact_id=msg.contact_id, conversation_id=conv_id, bot_turn_id=turn.id)
-        except SpendCapReached:
-            decision = HandoffDecision("Daily LLM spend cap reached (handoff-only mode)", "spend_cap")
-        except LLMError as exc:
-            decision = HandoffDecision(f"LLM unavailable ({exc})", "error")
-        else:
-            turn.confidence, turn.chunks, turn.cost_usd, turn.model = answer.confidence, [c.as_dict() for c in answer.chunks], answer.cost_usd, answer.model
-            turn.tool_calls = [{"name": t["name"], "args": t["args"], "output": t["output"]} for t in answer.tool_calls]
-            decision = post_answer_check(answer.confidence, answer.needs_human, answer.answered_from_knowledge, answer.unverified_amounts, threshold, answer.reason)
+    decision, answer = decide_and_answer(db, msg.content, history, profile, contact_phone=msg.contact_phone, contact_id=msg.contact_id, conversation_id=conv_id, turns=state.bot_turns, bot_turn_id=turn.id)
+    if answer is not None:
+        record_answer(turn, answer)
 
     if decision is None and answer is not None:
-        reply = answer.reply
-        greeting = (settings_store.get_setting(db, "greeting") or "").strip()
-        if greeting and state.bot_turns == 0 and not any(h["role"] == "assistant" for h in history):
-            reply = f"{greeting}\n\n{reply}"
+        reply = apply_greeting(db, answer.reply, state.bot_turns, history)
         sent = client.send_message(conv_id, reply)
         log_message(db, conv_id, _int(sent.get("id")), "outgoing", "agent_bot", False, reply)
         state.bot_turns += 1
@@ -286,20 +347,8 @@ def _process(db: Session, msg: IncomingMessage, started: float) -> None:
         return
 
     assert decision is not None
-    use_llm = decision.category not in ("spend_cap", "error", "bot_off")
-    summary_lines = None
-    suggestion = None
-    if use_llm:
-        try:
-            summary_lines = summarize_for_handoff(db, history, msg.content, conv_id)
-            if answer is not None and answer.answered_from_knowledge and answer.reply and not answer.unverified_amounts:
-                suggestion = answer.reply
-            else:
-                suggestion, _ = draft_reply(db, msg.content, history, profile, msg.contact_phone, msg.contact_id, conv_id)
-        except (SpendCapReached, LLMError):
-            pass
-    summary_lines = summary_lines or fallback_summary(msg.contact_name, history, msg.content, state.bot_turns)
-    perform_handoff(db, client, state, msg.content, decision, summary_lines, suggestion or None, settings_store.get_setting(db, "handoff_message"))
+    summary_lines, suggestion = prepare_handoff(db, decision, answer, history, msg.content, profile, contact_phone=msg.contact_phone, contact_id=msg.contact_id, conversation_id=conv_id, contact_name=msg.contact_name, turns=state.bot_turns)
+    perform_handoff(db, client, state, msg.content, decision, summary_lines, suggestion, settings_store.get_setting(db, "handoff_message"))
     turn.handoff, turn.handoff_reason, turn.handoff_category = True, truncate(decision.reason, 255), decision.category
     turn.unanswered = decision.category in ("no_knowledge", "low_confidence", "unverified_price")
     turn.reply = suggestion or ""
