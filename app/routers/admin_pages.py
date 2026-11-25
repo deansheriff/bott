@@ -39,6 +39,7 @@ from ..models import (
     WebhookEvent,
     WeeklyHours,
 )
+from ..security.passwords import generate_password, hash_password, password_problem
 from ..security.permissions import ACTION_LABELS, ADMIN_ROLE, AREAS, clean
 from ..security.sessions import revoke_user_sessions
 from ..services import audit, rbac, settings_store
@@ -784,13 +785,13 @@ def _can_manage(db: Session, auth: Auth, user: User) -> bool:
     return user.id != auth.user.id and can_grant(auth.perms, rbac.role_permissions(db, user.role))
 
 
-def _users_page(request, db, auth, link=None, error="", status=200):
+def _users_page(request, db, auth, link=None, error="", status=200, created=None, form=None):
     users = db.query(User).order_by(User.email).all()
     manageable = {u.id for u in users if _can_manage(db, auth, u)}
     return render(
         request,
         "admin/users.html",
-        {"users": users, "roles": _roles(db), "grantable": [r.name for r in _grantable_roles(db, auth)], "manageable": manageable, "link": link, "error": error},
+        {"users": users, "roles": _roles(db), "grantable": [r.name for r in _grantable_roles(db, auth)], "manageable": manageable, "link": link, "error": error, "created": created, "form": form or {}},
         auth=auth,
         db=db,
         status_code=status,
@@ -821,15 +822,78 @@ def _managed_user(request, db, auth, user_id: int):
     return user, None
 
 
+EMAIL_RE = re.compile(r"[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}")
+
+
+def _new_user_problem(db: Session, auth: Auth, email: str, role: str) -> tuple[str, int] | None:
+    if not EMAIL_RE.fullmatch(email):
+        return "Enter a valid email.", 400
+    if role not in [r.name for r in _grantable_roles(db, auth)]:
+        return "You can't assign that role.", 403
+    if db.query(User).filter(User.email == email).first():
+        return "A user with that email already exists.", 400
+    return None
+
+
+def _choose_password(password: str, email: str) -> tuple[str | None, bool, str | None]:
+    """Return (password, generated, error). An empty field means: generate a strong one."""
+    password = password.strip()
+    if not password:
+        return generate_password(), True, None
+    problem = password_problem(password, email)
+    return (None, False, problem) if problem else (password, False, None)
+
+
+@router.post("/users/create", response_class=HTMLResponse)
+def users_create(
+    request: Request,
+    email: str = Form(...),
+    role: str = Form("staff"),
+    password: str = Form(""),
+    must_change: str = Form(""),
+    auth: Auth = Depends(require("users.edit")),
+    db: Session = Depends(get_db),
+):
+    """Create a login directly: the admin sets the password (or lets the app generate one)."""
+    email = email.strip().lower()
+    form = {"email": email, "role": role, "must_change": must_change == "on"}
+    problem = _new_user_problem(db, auth, email, role)
+    if problem:
+        return _users_page(request, db, auth, error=problem[0], status=problem[1], form=form)
+    pw, generated, error = _choose_password(password, email)
+    if error:
+        return _users_page(request, db, auth, error=error, status=400, form=form)
+    user = User(email=email, role=role, password_hash=hash_password(pw), is_active=True, must_change_password=must_change == "on")
+    db.add(user)
+    db.flush()
+    audit.record(db, auth.user, "user.create", "user", user.id, None, {**user.public_dict(), "password": "set", "must_change_password": user.must_change_password}, auth.ip)
+    db.commit()
+    return _users_page(request, db, auth, created={"email": email, "password": pw if generated else None, "must_change": user.must_change_password, "action": "created"})
+
+
+@router.post("/users/{user_id}/password", response_class=HTMLResponse)
+def users_set_password(request: Request, user_id: int, password: str = Form(""), must_change: str = Form(""), auth: Auth = Depends(require("users.edit")), db: Session = Depends(get_db)):
+    user, err = _managed_user(request, db, auth, user_id)
+    if err:
+        return err
+    pw, generated, error = _choose_password(password, user.email)
+    if error:
+        return _users_page(request, db, auth, error=f"{user.email}: {error}", status=400)
+    user.password_hash = hash_password(pw)
+    user.must_change_password = must_change == "on"
+    db.query(UserToken).filter(UserToken.user_id == user.id, UserToken.used_at.is_(None)).delete(synchronize_session=False)
+    revoke_user_sessions(db, user.id)
+    audit.record(db, auth.user, "user.password_set", "user", user.id, None, {"password": "set", "must_change_password": user.must_change_password, "sessions_revoked": True}, auth.ip)
+    db.commit()
+    return _users_page(request, db, auth, created={"email": user.email, "password": pw if generated else None, "must_change": user.must_change_password, "action": "updated"})
+
+
 @router.post("/users/invite", response_class=HTMLResponse)
 def users_invite(request: Request, email: str = Form(...), role: str = Form("staff"), auth: Auth = Depends(require("users.edit")), db: Session = Depends(get_db)):
     email = email.strip().lower()
-    if not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}", email):
-        return _users_page(request, db, auth, error="Enter a valid email.", status=400)
-    if role not in [r.name for r in _grantable_roles(db, auth)]:
-        return _users_page(request, db, auth, error="You can't assign that role.", status=403)
-    if db.query(User).filter(User.email == email).first():
-        return _users_page(request, db, auth, error="A user with that email already exists.", status=400)
+    problem = _new_user_problem(db, auth, email, role)
+    if problem:
+        return _users_page(request, db, auth, error=problem[0], status=problem[1], form={"email": email, "role": role})
     user = User(email=email, role=role, is_active=True, must_change_password=False)
     db.add(user)
     db.flush()

@@ -74,6 +74,7 @@ To add a role, open **Roles**, tick the boxes and save, then assign it on **User
 | Knowledge file | Knowledge → **Delete** | The bot stops using it immediately. Its versions are kept: **Restore** brings it back; **Delete forever** removes the history. |
 | Menu item | Menu → **Delete** | Removed; an uploaded photo file is deleted too. Replaced photos are also cleaned up. |
 | Delivery zone / date override | Zones / Hours → **Delete** / **Remove** | Removed immediately. |
+| User's password | Users → **Set password** (type one or generate one) or **Reset link** | Signs them out everywhere; optionally makes them choose a new one at next login. |
 | User | Users → **Delete** | Access is removed at once, along with their sessions. The audit log keeps their history. |
 | Role | Roles → **Delete** | Only when no user has it. |
 | Customer data | Customer data → customer → **Delete memory only** or **Delete all stored data** | Memory only: name, phone, preferences, notes, orders and summaries. All: also the bot's stored transcripts, bot decisions and conversation records. The audit log records counts only, not the erased data. Chatwoot keeps its own copy, so delete it there too for a full erasure request. |
@@ -176,7 +177,7 @@ app/
   templates/            admin/*, panel/*
   static/               panel.js (postMessage + auth), admin.js, app.css
 knowledge/*.md          placeholder knowledge (copied into the volume on first boot)
-tests/                  pytest suite (123 tests)
+tests/                  pytest suite (132 tests)
 Dockerfile, docker-entrypoint.sh, docker-compose.yml, .env.example
 ```
 
@@ -226,6 +227,7 @@ To exercise the webhook locally, expose the port with a tunnel and point a test 
 | `test_gemini.py` | Gemini message mapping (system, merged turns, grouped tool results), thought signatures resent, tool schemas, thinking tokens billed, errors, provider/model switching, a full tool-call round trip, Settings validation |
 | `test_rbac.py` | Starter roles, view-only roles can't write, permission changes apply without re-login, creating/renaming/deleting roles, locked admin role, no privilege escalation (roles, invites, password resets, self-changes), last-admin protection, panel view vs act |
 | `test_deletes.py` | Knowledge delete/restore/purge and permission checks, user delete, customer data pages and search, memory-only vs full erasure (audit keeps counts only), menu photo cleanup, no reflected text in messages |
+| `test_user_create.py` | Creating logins with typed or generated passwords, forced first-login change, weak/duplicate rejection, role limits, setting passwords (signs out, can't target higher access or yourself), passwords never in the audit log, invite links still work |
 | `test_simulate.py` | Transcript parsing, a refund handoff showing summary and suggestion with no Chatwoot calls, the greeting on a direct reply, forced handoff, turn limit from bot lines, spend-cap fallback, escaping, CSRF and admin-only access |
 | `test_csrf.py` | Missing, wrong and cross-session tokens, Origin check, HTMX header token, login-form CSRF, panel CSRF header, `/copilot/translate` CSRF |
 
@@ -257,7 +259,7 @@ Volume note: if Coolify uses bind mounts instead of named volumes, make the host
 2. Open the target inbox → **Settings → Collaborators → Bot Configuration**, and select the bot. New conversations in that inbox now start as `pending`.
 3. **Settings → Integrations → Dashboard apps → Configure → Add**. Name: "Restaurant Bot". URL: `https://bot.example.com/app-panel/`.
 4. Send a test message from the website widget or WhatsApp and confirm the bot replies. Then send "I want a refund" and confirm the conversation moves to Open with two private notes.
-5. Open `https://bot.example.com/admin/` and change the initial password. Check **Roles** (adjust `staff` and `agent` or add your own), then invite people under **Users**. Invite links are shown once; send them privately.
+5. Open `https://bot.example.com/admin/` and change the initial password. Check **Roles** (adjust `staff` and `agent` or add your own), then add people under **Users → Add user**: enter their email and role, and either type a password or leave it empty to generate one. Send the login details privately. Invite links are still available if you'd rather they set their own password.
 6. **Each agent**:
    - logs in to `/admin/`;
    - opens **My profile** and pastes their Chatwoot **Access Token** (Chatwoot avatar → Profile settings);

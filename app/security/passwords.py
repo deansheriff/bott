@@ -29,6 +29,16 @@ def needs_rehash(password_hash: str) -> bool:
         return True
 
 
+_GEN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"  # no 0/O, 1/l/I
+
+
+def generate_password() -> str:
+    """Strong, readable password, e.g. 'Kp7rT-mQ2xd-Ha9wE-c3VnZ' (~117 bits)."""
+    import secrets
+
+    return "-".join("".join(secrets.choice(_GEN_ALPHABET) for _ in range(5)) for _ in range(4))
+
+
 def password_problem(password: str, email: str = "") -> str | None:
     if len(password) < MIN_LENGTH:
         return f"Password must be at least {MIN_LENGTH} characters."

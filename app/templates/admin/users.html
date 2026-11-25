@@ -5,16 +5,47 @@
 <h1 class="text-2xl font-semibold mb-1">Users</h1>
 <p class="text-sm text-slate-600 mb-4">What each role can do is set on <a class="underline" href="/admin/roles">Roles</a>. You can only manage users whose access doesn't exceed yours, and only assign roles you could grant yourself.</p>
 {% if error %}<p class="mb-3 text-sm bg-red-50 text-red-700 p-2 rounded">{{ error }}</p>{% endif %}
+
+{% if created %}
+  <div class="mb-4 text-sm bg-green-50 border border-green-200 p-3 rounded space-y-1">
+    <p><strong>Login {{ created.action }} for {{ created.email }}.</strong></p>
+    <p>Log-in page: <code>{{ request.base_url }}admin/login</code> · Email: <code>{{ created.email }}</code></p>
+    {% if created.password %}
+      <p>Generated password (shown only once; copy it now and send it privately):</p>
+      <input readonly value="{{ created.password }}" class="w-full border rounded px-2 py-1 font-mono" data-select-on-focus>
+    {% else %}<p>Password: the one you typed.</p>{% endif %}
+    <p class="text-xs text-slate-600">{% if created.must_change %}They'll be asked to choose their own password the first time they log in.{% else %}They can keep this password; they can change it any time under My profile.{% endif %}</p>
+  </div>
+{% endif %}
 {% if link %}
   <div class="mb-4 text-sm bg-blue-50 border border-blue-200 p-3 rounded">
     <p>{{ "Invite" if link.purpose == "invite" else "Password reset" }} link for <strong>{{ link.email }}</strong>. Send it privately; it is shown only once and expires in {{ "72" if link.purpose == "invite" else "24" }} hours.</p>
     <input readonly value="{{ link.url }}" class="mt-2 w-full border rounded px-2 py-1 font-mono text-xs" data-select-on-focus>
   </div>
 {% endif %}
-<table class="w-full bg-white shadow rounded text-sm mb-6">
+
+{% if can("users.edit") %}
+<form method="post" action="/admin/users/create" class="bg-white shadow rounded p-4 mb-6 text-sm space-y-2">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2 class="font-semibold">Add user</h2>
+  <div class="flex flex-wrap gap-2 items-end">
+    <label class="flex-1 min-w-[14rem]">Email<input name="email" type="email" required value="{{ form.email or '' }}" class="block w-full border rounded px-2 py-1"></label>
+    <label>Role<select name="role" class="block border rounded px-1 py-1">{% for r in grantable %}<option {% if r == (form.role or "staff") %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></label>
+    <label class="flex-1 min-w-[14rem]">Password<input name="password" type="text" autocomplete="new-password" minlength="12" placeholder="Leave empty to generate a strong one" class="block w-full border rounded px-2 py-1 font-mono"></label>
+  </div>
+  <label class="inline-flex items-center gap-2"><input type="checkbox" name="must_change" {% if form.must_change is not defined or form.must_change %}checked{% endif %}> Ask them to choose their own password at first login (recommended)</label>
+  <div class="flex flex-wrap gap-2 items-center">
+    <button class="bg-slate-900 text-white rounded px-3 py-1">Create login</button>
+    <button formaction="/admin/users/invite" formnovalidate class="border rounded px-3 py-1" title="Creates the user without a password and gives you a link where they set their own">Send an invite link instead</button>
+    <span class="text-xs text-slate-500">Passwords need 12+ characters.</span>
+  </div>
+</form>
+{% endif %}
+
+<table class="w-full bg-white shadow rounded text-sm">
   <thead class="text-left text-slate-500"><tr><th class="p-2">Email</th><th class="p-2">Role</th><th class="p-2">Status</th><th class="p-2">Chatwoot</th><th class="p-2">Last login</th><th></th></tr></thead>
   {% for u in users %}{% set mine = u.id == user.id %}{% set manage = u.id in manageable and can("users.edit") %}
-  <tr class="border-t">
+  <tr class="border-t align-top">
     <td class="p-2">{{ u.email }}{% if mine %} <span class="text-xs text-slate-500">(you)</span>{% endif %}</td>
     <td class="p-2">
       {% if manage %}
@@ -24,12 +55,22 @@
         </select><button class="underline">Set</button></form>
       {% else %}{{ u.role }}{% endif %}
     </td>
-    <td class="p-2">{{ "Active" if u.is_active else "Disabled" }}{% if not u.password_hash %} · invite pending{% endif %}</td>
+    <td class="p-2">{{ "Active" if u.is_active else "Disabled" }}{% if not u.password_hash %} · invite pending{% elif u.must_change_password %} · must change password{% endif %}</td>
     <td class="p-2">{{ "connected" if u.chatwoot_token_enc else "—" }}</td>
     <td class="p-2">{{ u.last_login_at|local if u.last_login_at else "—" }}</td>
-    <td class="p-2 text-right whitespace-nowrap">
+    <td class="p-2 text-right">
       {% if manage %}
-        <form method="post" action="/admin/users/{{ u.id }}/reset" class="inline" data-confirm="Issue a password reset link for {{ u.email }}? Their sessions will be signed out."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="underline">Reset password</button></form>
+        <details class="inline-block text-left">
+          <summary class="underline cursor-pointer">Set password</summary>
+          <form method="post" action="/admin/users/{{ u.id }}/password" class="mt-1 p-2 border rounded bg-slate-50 space-y-1 w-72">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input name="password" type="text" autocomplete="new-password" minlength="12" placeholder="Empty = generate one" class="w-full border rounded px-2 py-1 font-mono">
+            <label class="flex items-center gap-1 text-xs"><input type="checkbox" name="must_change" checked> Make them change it at next login</label>
+            <button class="bg-slate-900 text-white rounded px-2 py-0.5 text-xs">Save password</button>
+            <p class="text-xs text-slate-500">Signs them out everywhere.</p>
+          </form>
+        </details>
+        <form method="post" action="/admin/users/{{ u.id }}/reset" class="inline" data-confirm="Create a password reset link for {{ u.email }}? Their sessions will be signed out."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="underline ml-2">Reset link</button></form>
         <form method="post" action="/admin/users/{{ u.id }}/active" class="inline" data-confirm="{{ 'Disable' if u.is_active else 'Enable' }} {{ u.email }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="underline ml-2">{{ "Disable" if u.is_active else "Enable" }}</button></form>
       {% endif %}
       {% if u.id in manageable and can("users.delete") %}
@@ -39,12 +80,4 @@
   </tr>
   {% endfor %}
 </table>
-{% if can("users.edit") %}
-<form method="post" action="/admin/users/invite" class="bg-white shadow rounded p-4 flex gap-2 items-end text-sm">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label class="flex-1">Email<input name="email" type="email" required class="block w-full border rounded px-2 py-1"></label>
-  <label>Role<select name="role" class="block border rounded px-1 py-1">{% for r in grantable %}<option {% if r == "staff" %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></label>
-  <button class="bg-slate-900 text-white rounded px-3 py-1">Invite</button>
-</form>
-{% endif %}
 {% endblock %}
