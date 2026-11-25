@@ -4,7 +4,7 @@
 {% block content %}
 <div class="flex items-center justify-between mb-4">
   <h1 class="text-2xl font-semibold">Menu</h1>
-  <a href="/admin/menu/new" class="bg-slate-900 text-white rounded px-3 py-1 text-sm">Add item</a>
+  {% if can("menu.edit") %}<a href="/admin/menu/new" class="bg-slate-900 text-white rounded px-3 py-1 text-sm">Add item</a>{% endif %}
 </div>
 <p class="text-xs text-slate-500 mb-2">The bot quotes prices and availability only from this table. Changes apply immediately. “86'd today” clears itself at local midnight.</p>
 <table class="w-full bg-white shadow rounded text-sm">

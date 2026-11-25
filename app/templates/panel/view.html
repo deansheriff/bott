@@ -16,12 +16,12 @@
           {% if bot_switch and bot_switch != "ON" %}<span class="text-xs text-amber-700"> (global switch {{ bot_switch }})</span>{% endif %}
         </div>
       </div>
-      <div class="flex gap-2">
+      <div class="flex gap-2">{% if can("panel.act") %}
         {% if bot_status == "active" %}
           <button hx-post="/app-panel/api/conversations/{{ cid }}/takeover" hx-target="#panel" hx-confirm="Take over this conversation? The bot will stop replying." class="bg-slate-900 text-white rounded px-3 py-1">Take over</button>
         {% else %}
           <button hx-post="/app-panel/api/conversations/{{ cid }}/return-to-bot" hx-target="#panel" hx-confirm="Return this conversation to the bot (status pending)?" class="border rounded px-3 py-1">Return to bot</button>
-        {% endif %}
+        {% endif %}{% endif %}
       </div>
     </div>
     {% if state and state.handoff_reason %}
@@ -61,6 +61,7 @@
     <p id="translation-out" class="mt-1 text-xs bg-slate-50 rounded px-2 hidden"></p>
   </section>
 
+  {% if can("panel.act") %}
   {# ---------------- copilot ---------------- #}
   <section class="border rounded p-3 space-y-2">
     <div class="flex items-center justify-between"><h2 class="font-semibold">Copilot reply</h2>
@@ -91,6 +92,7 @@
       <button class="border rounded px-3">Add note</button>
     </form>
   </section>
+  {% else %}<p class="text-xs text-slate-500">Your role can view bot details but not act on conversations.</p>{% endif %}
 
   {# ---------------- contact memory ---------------- #}
   <section class="border rounded p-3">
@@ -108,7 +110,7 @@
 {% endfor %}{% endif %}</textarea></label>
       {% if memory and memory.summaries %}<details><summary class="text-xs cursor-pointer">Past conversation summaries ({{ memory.summaries|length }})</summary>
         {% for s in memory.summaries|reverse %}<p class="text-xs mt-1"><span class="text-slate-500">{{ s.date }}:</span> {{ s.summary }}</p>{% endfor %}</details>{% endif %}
-      <button class="border rounded px-3 py-1">Save memory</button>
+      {% if can("panel.act") %}<button class="border rounded px-3 py-1">Save memory</button>{% endif %}
     </form>
   </section>
 

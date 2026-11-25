@@ -163,14 +163,14 @@ def set_password_submit(request: Request, token: str, new: str = Form(""), confi
 
 # ------------------------------------------------------------------ panel pairing
 @router.get("/panel-link", response_class=HTMLResponse)
-def panel_link_form(request: Request, code: str = "", auth: Auth = Depends(require("profile")), db: Session = Depends(get_db)):
+def panel_link_form(request: Request, code: str = "", auth: Auth = Depends(require("panel.view")), db: Session = Depends(get_db)):
     link = db.query(PanelLink).filter(PanelLink.code == code.strip().upper()).one_or_none() if code else None
     valid = link is not None and link.expires_at > utcnow() and link.confirmed_at is None
     return render(request, "admin/panel_link.html", {"code": code.strip().upper()[:16], "valid": valid, "done": False}, auth=auth, db=db)
 
 
 @router.post("/panel-link", response_class=HTMLResponse)
-def panel_link_confirm(request: Request, code: str = Form(""), auth: Auth = Depends(require("profile")), db: Session = Depends(get_db)):
+def panel_link_confirm(request: Request, code: str = Form(""), auth: Auth = Depends(require("panel.view")), db: Session = Depends(get_db)):
     link = db.query(PanelLink).filter(PanelLink.code == code.strip().upper()).one_or_none()
     if link is None or link.expires_at < utcnow() or link.confirmed_at is not None:
         return render(request, "admin/panel_link.html", {"code": code, "valid": False, "done": False}, auth=auth, db=db, status_code=410)
@@ -183,12 +183,12 @@ def panel_link_confirm(request: Request, code: str = Form(""), auth: Auth = Depe
 
 # ------------------------------------------------------------------ profile
 @router.get("/profile", response_class=HTMLResponse)
-def profile(request: Request, auth: Auth = Depends(require("profile")), db: Session = Depends(get_db)):
+def profile(request: Request, auth: Auth = Depends(require()), db: Session = Depends(get_db)):
     return render(request, "admin/profile.html", {"error": "", "flash": ""}, auth=auth, db=db)
 
 
 @router.post("/profile/chatwoot-token", response_class=HTMLResponse)
-def connect_token(request: Request, token: str = Form(""), auth: Auth = Depends(require("profile")), db: Session = Depends(get_db)):
+def connect_token(request: Request, token: str = Form(""), auth: Auth = Depends(require()), db: Session = Depends(get_db)):
     token = token.strip()
     user = auth.user
 
@@ -215,7 +215,7 @@ def connect_token(request: Request, token: str = Form(""), auth: Auth = Depends(
 
 
 @router.post("/profile/chatwoot-token/delete", response_class=HTMLResponse)
-def disconnect_token(request: Request, auth: Auth = Depends(require("profile")), db: Session = Depends(get_db)):
+def disconnect_token(request: Request, auth: Auth = Depends(require()), db: Session = Depends(get_db)):
     user = auth.user
     user.chatwoot_token_enc = None
     audit.record(db, user, "user.chatwoot_token_disconnect", "user", user.id, {"chatwoot_token": True}, {"chatwoot_token": False}, auth.ip)
@@ -224,7 +224,7 @@ def disconnect_token(request: Request, auth: Auth = Depends(require("profile")),
 
 
 @router.post("/profile/panel-sessions/revoke", response_class=HTMLResponse)
-def revoke_panels(request: Request, auth: Auth = Depends(require("profile")), db: Session = Depends(get_db)):
+def revoke_panels(request: Request, auth: Auth = Depends(require()), db: Session = Depends(get_db)):
     n = revoke_user_sessions(db, auth.user.id, kind="panel")
     audit.record(db, auth.user, "user.panel_sessions_revoked", "user", auth.user.id, None, {"revoked": n}, auth.ip)
     db.commit()

@@ -4,7 +4,9 @@
 {% block content %}
 <h1 class="text-2xl font-semibold mb-2">Hours & closures</h1>
 <p class="text-sm mb-4">Right now: {% if not status.configured %}<strong>hours not configured</strong>{% elif status.open_now %}<strong class="text-green-700">open</strong> (closes {{ status.closes_at }}){% else %}<strong class="text-red-700">closed</strong>{% if status.next_open %} · next open {{ status.next_open }}{% endif %}{% endif %} · {{ status.local_time }}</p>
+{% set ro = not can("hours.edit") %}
 <form method="post" action="/admin/hours/weekly" class="bg-white shadow rounded p-4 mb-6">
+  <fieldset {% if ro %}disabled{% endif %}>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <table class="text-sm">
     <thead class="text-left text-slate-500"><tr><th class="p-1">Day</th><th class="p-1">Opens</th><th class="p-1">Closes</th><th class="p-1">Closed all day</th></tr></thead>
@@ -16,16 +18,17 @@
     {% endfor %}
   </table>
   <p class="text-xs text-slate-500 mt-2">A closing time earlier than the opening time means the restaurant closes after midnight. Days without valid times are saved as closed.</p>
-  <button class="mt-3 bg-slate-900 text-white rounded px-4 py-1 text-sm">Save weekly hours</button>
+  {% if not ro %}<button class="mt-3 bg-slate-900 text-white rounded px-4 py-1 text-sm">Save weekly hours</button>{% endif %}
+  </fieldset>
 </form>
 <h2 class="font-semibold mb-2">Date overrides (holidays, outages)</h2>
 <table class="w-full bg-white shadow rounded text-sm mb-3">
   {% for o in overrides %}
   <tr class="border-t"><td class="p-2">{{ o.day.isoformat() }}</td><td class="p-2">{{ "Closed" if o.closed else o.open_time ~ "–" ~ o.close_time }}</td><td class="p-2">{{ o.note }}</td>
-    <td class="p-2 text-right"><form method="post" action="/admin/hours/override/{{ o.id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-red-700 underline">Remove</button></form></td></tr>
+    <td class="p-2 text-right">{% if can("hours.delete") %}<form method="post" action="/admin/hours/override/{{ o.id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-red-700 underline">Remove</button></form>{% endif %}</td></tr>
   {% else %}<tr><td class="p-2 text-slate-500">No upcoming overrides.</td></tr>{% endfor %}
 </table>
-<form method="post" action="/admin/hours/override" class="bg-white shadow rounded p-4 flex flex-wrap gap-2 items-end text-sm">
+{% if not ro %}<form method="post" action="/admin/hours/override" class="bg-white shadow rounded p-4 flex flex-wrap gap-2 items-end text-sm">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>Date<input type="date" name="day" required class="block border rounded px-1"></label>
   <label><input type="checkbox" name="closed" checked> Closed</label>
@@ -33,5 +36,5 @@
   <label>Closes<input type="time" name="close_time" class="block border rounded px-1"></label>
   <label class="flex-1">Note<input name="note" maxlength="255" placeholder="e.g. Christmas Day" class="block w-full border rounded px-1"></label>
   <button class="bg-slate-900 text-white rounded px-3 py-1">Add override</button>
-</form>
+</form>{% endif %}
 {% endblock %}

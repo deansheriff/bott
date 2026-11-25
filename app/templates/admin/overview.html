@@ -30,7 +30,7 @@
   <section class="bg-white shadow rounded p-4">
     <h2 class="font-semibold mb-2">Global bot switch</h2>
     <p class="text-sm mb-3">Current: <strong>{{ bot_switch }}</strong></p>
-    {% if can("bot_switch") %}
+    {% if can("bot_switch.edit") %}
     <div class="flex gap-2">
       {% for v, desc in [("ON", "The bot answers customers."), ("PAUSED", "The bot does nothing; conversations stay pending."), ("OFF", "The bot does not answer and sends every new message straight to humans (status open).")] %}
       <form method="post" action="/admin/bot-switch" data-confirm="Set the bot to {{ v }}? {{ desc }}">

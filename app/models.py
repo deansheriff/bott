@@ -23,10 +23,20 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 from .utils import utcnow
 
-ROLES = ("admin", "staff")
-
-
 # --------------------------------------------------------------------- auth
+class Role(Base):
+    """RBAC role. User.role holds the role name. 'admin' is built-in (all permissions, locked)."""
+
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    description: Mapped[str] = mapped_column(String(255), default="")
+    permissions: Mapped[Any] = mapped_column(JSON, default=list)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
 class User(Base):
     __tablename__ = "users"
 

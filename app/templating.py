@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from .config import get_settings
-from .deps import PERMISSIONS, Auth
+from .deps import Auth
 from .services.spend import cap_reached
 from .utils import format_money, to_local
 
@@ -41,7 +41,7 @@ def render(request: Request, name: str, ctx: dict[str, Any] | None = None, *, au
     context.setdefault("auth", auth)
     context.setdefault("user", auth.user if auth else None)
     context.setdefault("csrf_token", auth.csrf if auth else context.get("csrf_token", ""))
-    context.setdefault("can", (lambda p: auth.user.role in PERMISSIONS.get(p, set())) if auth else (lambda p: False))
+    context.setdefault("can", auth.can if auth else (lambda p: False))
     if db is not None and auth is not None:
         from .services.settings_store import get_setting
 

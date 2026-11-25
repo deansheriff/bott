@@ -41,6 +41,45 @@ A FastAPI service that answers restaurant customers in Chatwoot, hands off to hu
 
 This reconciles two lines of the spec: "do nothing" in the webhook section and "OFF sends all new conversations to humans" on the Overview page.
 
+## Roles and permissions (RBAC)
+
+Every user has one **role**, and a role is a list of permissions. Permissions are checked on the server for every page and action, and changes take effect on the user's next click.
+
+**Permissions** come in the form `<area>.<action>`:
+- **Areas:** Overview, Bot switch, Knowledge, Menu, Delivery zones, Hours, Customer data, Playground, Analytics, Settings, Users, Roles, Audit log, Chatwoot panel.
+- **Actions:** *View*, *Create & edit*, *Delete*; *Use* for the Playground; *Act on conversations* for the Chatwoot panel (take over, send, draft, edit memory). Edit and Delete include View.
+
+**Roles you start with:**
+
+| Role | Can do |
+|---|---|
+| `admin` | Everything, including permissions added in future versions. Built-in: can't be edited or deleted. |
+| `staff` | Knowledge, Menu and Hours (view, edit, delete), Analytics, Overview, and the Chatwoot panel |
+| `agent` | Overview and the Chatwoot panel only, for Chatwoot agents |
+
+To add a role, open **Roles**, tick the boxes and save, then assign it on **Users**. A role can't be deleted while anyone still has it.
+
+**Safeguards against giving yourself more access:**
+- You can only put permissions you hold yourself into a role.
+- You can only assign roles whose permissions you hold.
+- You can only manage users (reset password, disable, delete, change role) whose access doesn't exceed yours. Otherwise, for example, someone could issue a password reset for an admin and take over that account.
+- You can't change, disable or delete your own account from **Users**.
+- The last active admin can't be demoted, disabled or deleted.
+- Every role and user change is in the audit log.
+
+## Deleting things
+
+| What | Where | What happens |
+|---|---|---|
+| Knowledge file | Knowledge → **Delete** | The bot stops using it immediately. Its versions are kept: **Restore** brings it back; **Delete forever** removes the history. |
+| Menu item | Menu → **Delete** | Removed; an uploaded photo file is deleted too. Replaced photos are also cleaned up. |
+| Delivery zone / date override | Zones / Hours → **Delete** / **Remove** | Removed immediately. |
+| User | Users → **Delete** | Access is removed at once, along with their sessions. The audit log keeps their history. |
+| Role | Roles → **Delete** | Only when no user has it. |
+| Customer data | Customer data → customer → **Delete memory only** or **Delete all stored data** | Memory only: name, phone, preferences, notes, orders and summaries. All: also the bot's stored transcripts, bot decisions and conversation records. The audit log records counts only, not the erased data. Chatwoot keeps its own copy, so delete it there too for a full erasure request. |
+
+Every delete asks for confirmation and is written to the audit log. The audit log itself can't be edited or deleted.
+
 ## Testing the copilot without Chatwoot: Simulate handoff
 
 On **Playground → Simulate handoff** (admin only):
@@ -104,11 +143,12 @@ app/
   main.py               app factory (uvicorn app.main:create_app --factory), bootstrap, error handlers
   config.py             pydantic-settings
   db.py, models.py      SQLAlchemy 2 (Postgres in prod, SQLite in dev/tests)
-  deps.py               auth dependencies, role map (PERMISSIONS), CSRF checks
+  deps.py               auth dependencies (permission checks per route), CSRF checks
   templating.py         Jinja2 (autoescape on)
   logging_setup.py      JSON logs; secret-looking fields masked
   security/
     signature.py        webhook HMAC + timestamp check
+    permissions.py      RBAC permission catalogue and starter roles
     sessions.py         server-side sessions (web cookie / panel bearer), 30 min idle, 12 h absolute
     passwords.py        argon2id
     crypto.py           Fernet encryption of agents' Chatwoot tokens
@@ -130,12 +170,13 @@ app/
     spend.py            LLM usage, cost, daily cap
     settings_store.py   runtime settings (DB) with env defaults
     audit.py            audit log writer
+    rbac.py             roles, permission lookup, anti-escalation rules
     llm/                LLMProvider interface, OpenAI + Gemini adapters, fake provider, pricing
-  routers/              webhooks, panel, admin_auth, admin_pages, copilot, health
+  routers/              webhooks, panel, admin_auth, admin_pages, admin_contacts, copilot, health
   templates/            admin/*, panel/*
   static/               panel.js (postMessage + auth), admin.js, app.css
 knowledge/*.md          placeholder knowledge (copied into the volume on first boot)
-tests/                  pytest suite (102 tests)
+tests/                  pytest suite (123 tests)
 Dockerfile, docker-entrypoint.sh, docker-compose.yml, .env.example
 ```
 
@@ -183,6 +224,8 @@ To exercise the webhook locally, expose the port with a tunnel and point a test 
 | `test_dashboard_auth.py` | Login, cookie flags, forced password change, roles, lockout, idle/absolute timeouts, forged cookies, open-redirect guard, frame headers, the panel link flow, single-use nonce, bearer-only panel, agent token used for sends, Chatwoot access check |
 | `test_import.py` | DOCX headings/lists/tables/FAQ questions, PDF text extraction, scanned-PDF rejection, type detection by content, size limit, zip-bomb and non-Word zip rejection, review-before-save, CSRF and role checks, prices in documents not trusted |
 | `test_gemini.py` | Gemini message mapping (system, merged turns, grouped tool results), thought signatures resent, tool schemas, thinking tokens billed, errors, provider/model switching, a full tool-call round trip, Settings validation |
+| `test_rbac.py` | Starter roles, view-only roles can't write, permission changes apply without re-login, creating/renaming/deleting roles, locked admin role, no privilege escalation (roles, invites, password resets, self-changes), last-admin protection, panel view vs act |
+| `test_deletes.py` | Knowledge delete/restore/purge and permission checks, user delete, customer data pages and search, memory-only vs full erasure (audit keeps counts only), menu photo cleanup, no reflected text in messages |
 | `test_simulate.py` | Transcript parsing, a refund handoff showing summary and suggestion with no Chatwoot calls, the greeting on a direct reply, forced handoff, turn limit from bot lines, spend-cap fallback, escaping, CSRF and admin-only access |
 | `test_csrf.py` | Missing, wrong and cross-session tokens, Origin check, HTMX header token, login-form CSRF, panel CSRF header, `/copilot/translate` CSRF |
 
@@ -214,7 +257,7 @@ Volume note: if Coolify uses bind mounts instead of named volumes, make the host
 2. Open the target inbox → **Settings → Collaborators → Bot Configuration**, and select the bot. New conversations in that inbox now start as `pending`.
 3. **Settings → Integrations → Dashboard apps → Configure → Add**. Name: "Restaurant Bot". URL: `https://bot.example.com/app-panel/`.
 4. Send a test message from the website widget or WhatsApp and confirm the bot replies. Then send "I want a refund" and confirm the conversation moves to Open with two private notes.
-5. Open `https://bot.example.com/admin/`, change the initial password, and create staff accounts under **Users**. Invite links are shown once; send them privately.
+5. Open `https://bot.example.com/admin/` and change the initial password. Check **Roles** (adjust `staff` and `agent` or add your own), then invite people under **Users**. Invite links are shown once; send them privately.
 6. **Each agent**:
    - logs in to `/admin/`;
    - opens **My profile** and pastes their Chatwoot **Access Token** (Chatwoot avatar → Profile settings);
@@ -232,7 +275,7 @@ Volume note: if Coolify uses bind mounts instead of named volumes, make the host
 - [ ] Webhook: signature over `{timestamp}.{raw_body}`, a ±5-minute window, constant-time compare, 1 MB body limit, per-conversation rate limit and message-ID de-duplication.
 - [ ] Admin pages send `X-Frame-Options: DENY` and `frame-ancestors 'none'`. Only `/app-panel` (and `/static`) allow framing, by `'self'` and the Chatwoot origin.
 - [ ] CSRF tokens on every admin form and HTMX request, plus an `Origin` check. The panel uses a bearer token and a CSRF header (no cookies).
-- [ ] Roles are enforced server-side (`app/deps.py: PERMISSIONS`). Staff can use Overview, Knowledge, Menu, Hours, Analytics and their own profile. Admins can also use Zones, Playground, Settings, Users, Audit and the bot switch.
+- [ ] Review **Roles**: permissions are enforced on the server for every route (`app/security/permissions.py`). Give `users.*` and `roles.*` only to people you trust; the anti-escalation rules stop them exceeding their own access, not misusing it.
 - [ ] Logins: argon2id, lockout after 5 failures per account or 20 per IP in 15 minutes, generic error messages.
 - [ ] Customer text is escaped everywhere (Jinja autoescape). The Markdown preview is sanitised with `nh3`. CSV exports neutralise formula injection.
 - [ ] Logs are JSON with IDs and event types only. No message bodies, no query strings (the uvicorn access log is off), and secret-looking fields are masked.

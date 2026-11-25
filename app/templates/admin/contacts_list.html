@@ -1,0 +1,27 @@
+{% extends "admin/layout.html" %}
+{% set active = "contacts" %}
+{% block title %}Customer data{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-1">Customer data</h1>
+<p class="text-sm text-slate-600 mb-4">What the bot remembers about customers: name, phone, language, preferences, notes, recent orders and conversation summaries. Deleting here removes the bot's copy only; Chatwoot keeps its own history.</p>
+{% if flash %}<p class="mb-3 text-sm bg-green-50 text-green-800 p-2 rounded">{{ flash }}</p>{% endif %}
+<form method="get" class="mb-3 flex gap-2 text-sm">
+  <input name="q" value="{{ q }}" placeholder="Search name, phone or Chatwoot contact ID" class="flex-1 border rounded px-2 py-1">
+  <button class="border rounded px-3">Search</button>
+</form>
+<table class="w-full bg-white shadow rounded text-sm">
+  <thead class="text-left text-slate-500"><tr><th class="p-2">Customer</th><th class="p-2">Phone</th><th class="p-2">Language</th><th class="p-2">Conversations</th><th class="p-2">Updated</th></tr></thead>
+  {% for m in rows %}
+  <tr class="border-t">
+    <td class="p-2"><a class="underline" href="/admin/contacts/{{ m.contact_id }}">{{ m.name or "(no name)" }}</a> <span class="text-xs text-slate-400">#{{ m.contact_id }}</span></td>
+    <td class="p-2">{{ m.phone }}</td><td class="p-2">{{ m.preferred_language or "auto" }}</td>
+    <td class="p-2">{{ conv_counts.get(m.contact_id, 0) }}</td><td class="p-2">{{ m.updated_at|local }}</td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="p-2 text-slate-500">{{ "No matches." if q else "No customers stored yet." }}</td></tr>{% endfor %}
+</table>
+<div class="mt-3 text-sm flex gap-3">
+  {% if page > 1 %}<a class="underline" href="?q={{ q|urlencode }}&page={{ page - 1 }}">← Previous</a>{% endif %}
+  <span>Page {{ page }} / {{ pages }} · {{ total }} customer(s)</span>
+  {% if page < pages %}<a class="underline" href="?q={{ q|urlencode }}&page={{ page + 1 }}">Next →</a>{% endif %}
+</div>
+{% endblock %}

@@ -59,6 +59,9 @@ class KnowledgeBase:
         tmp.write_text(content, encoding="utf-8", newline="\n")
         os.replace(tmp, path)
 
+    def delete(self, name: str) -> None:
+        self._path(name).unlink(missing_ok=True)
+
     @staticmethod
     def validate(name: str, content: str, max_bytes: int) -> list[str]:
         errors = []

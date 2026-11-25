@@ -7,20 +7,23 @@
 {% if notice %}<p class="mb-2 text-sm bg-blue-50 border border-blue-200 text-blue-900 p-2 rounded">{{ notice }}</p>{% endif %}
 {% for w in warnings or [] %}<p class="mb-2 text-sm bg-amber-50 text-amber-900 p-2 rounded">{{ w }}</p>{% endfor %}
 {% for e in errors %}<p class="mb-2 text-sm bg-red-50 text-red-700 p-2 rounded">{{ e }}</p>{% endfor %}
+{% set ro = not can("knowledge.edit") %}
+{% if ro %}<p class="mb-2 text-sm text-slate-500">Read-only: your role can view knowledge but not edit it.</p>{% endif %}
 <form method="post" action="/admin/knowledge/{{ name }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   {% if is_new %}<input type="hidden" name="create" value="1">{% endif %}
   <div class="grid md:grid-cols-2 gap-4">
-    <textarea name="content" rows="28" class="w-full border rounded p-2 font-mono text-sm"
-      hx-post="/admin/knowledge/preview" hx-trigger="keyup changed delay:400ms" hx-target="#preview" hx-swap="innerHTML">{{ content }}</textarea>
+    <textarea name="content" rows="28" {% if ro %}readonly{% endif %} class="w-full border rounded p-2 font-mono text-sm"
+      {% if not ro %}hx-post="/admin/knowledge/preview" hx-trigger="keyup changed delay:400ms" hx-target="#preview" hx-swap="innerHTML"{% endif %}>{{ content }}</textarea>
     <div id="preview" class="prose bg-white border rounded p-4 overflow-auto max-h-[42rem]">{{ preview|safe }}</div>
   </div>
   <p class="text-xs text-slate-500 mt-1">Limit {{ "{:,}".format(max_bytes) }} bytes. Every save creates a version and rebuilds the search index.</p>
-  <div class="flex gap-2 mt-3">
+  {% if not ro %}<div class="flex gap-2 mt-3">
     <input name="note" maxlength="255" value="{{ note or '' }}" placeholder="Change note (optional)" class="flex-1 border rounded px-2 py-1 text-sm">
     <button class="bg-slate-900 text-white rounded px-4 py-1 text-sm">Save version</button>
-  </div>
+  </div>{% endif %}
 </form>
+{% if can("knowledge.delete") and not is_new %}<form method="post" action="/admin/knowledge/{{ name }}/delete" class="mt-2" data-confirm="Delete {{ name }}? The bot stops using it straight away. You can restore it later from Deleted files."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-sm text-red-700 underline">Delete this file</button></form>{% endif %}
 <h2 class="font-semibold mt-6 mb-2">Versions</h2>
 <table class="w-full bg-white shadow rounded text-sm">
   <thead class="text-left text-slate-500"><tr><th class="p-2">Version</th><th class="p-2">When</th><th class="p-2">By</th><th class="p-2">Note</th><th></th></tr></thead>

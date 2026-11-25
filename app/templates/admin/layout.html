@@ -4,12 +4,14 @@
   <nav class="w-56 bg-slate-900 text-slate-200 flex flex-col">
     <div class="px-4 py-4 font-semibold text-white">{{ restaurant_name() }}<div class="text-xs text-slate-400 font-normal">Bot admin</div></div>
     {% set items = [
-      ("overview", "/admin/", "Overview"), ("knowledge", "/admin/knowledge", "Knowledge"), ("menu", "/admin/menu", "Menu"),
-      ("zones", "/admin/zones", "Delivery zones"), ("hours", "/admin/hours", "Hours & closures"), ("playground", "/admin/playground", "Playground"),
-      ("analytics", "/admin/analytics", "Analytics"), ("settings", "/admin/settings", "Settings"), ("users", "/admin/users", "Users"),
-      ("audit", "/admin/audit", "Audit log"), ("profile", "/admin/profile", "My profile")] %}
-    {% for perm, href, label in items %}{% if can(perm) %}
-      <a href="{{ href }}" class="px-4 py-2 text-sm hover:bg-slate-800 {% if active == perm %}bg-slate-800 text-white{% endif %}">{{ label }}</a>
+      ("overview", "overview.view", "/admin/", "Overview"), ("knowledge", "knowledge.view", "/admin/knowledge", "Knowledge"),
+      ("menu", "menu.view", "/admin/menu", "Menu"), ("zones", "zones.view", "/admin/zones", "Delivery zones"),
+      ("hours", "hours.view", "/admin/hours", "Hours & closures"), ("contacts", "contacts.view", "/admin/contacts", "Customer data"),
+      ("playground", "playground.use", "/admin/playground", "Playground"), ("analytics", "analytics.view", "/admin/analytics", "Analytics"),
+      ("settings", "settings.view", "/admin/settings", "Settings"), ("users", "users.view", "/admin/users", "Users"),
+      ("roles", "roles.view", "/admin/roles", "Roles"), ("audit", "audit.view", "/admin/audit", "Audit log"), ("profile", "", "/admin/profile", "My profile")] %}
+    {% for key, perm, href, label in items %}{% if not perm or can(perm) %}
+      <a href="{{ href }}" class="px-4 py-2 text-sm hover:bg-slate-800 {% if active == key %}bg-slate-800 text-white{% endif %}">{{ label }}</a>
     {% endif %}{% endfor %}
     <div class="mt-auto p-4 text-xs text-slate-400">
       {{ user.email }} · {{ user.role }}

@@ -11,15 +11,16 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import Settings, get_settings, set_settings
 from .db import create_all, init_engine, session_scope
-from .deps import CSRFFailed, Forbidden, LoginRequired, PanelUnauthorized, PasswordChangeRequired
+from .deps import CSRFFailed, Forbidden, LoginRequired, PanelForbidden, PanelUnauthorized, PasswordChangeRequired
 from .logging_setup import setup_logging
 from .models import DeliveryZone, MenuItem, User, WeeklyHours
-from .routers import admin_auth, admin_pages, copilot, health, panel, webhooks
+from .routers import admin_auth, admin_contacts, admin_pages, copilot, health, panel, webhooks
 from .security import middleware
 from .security.passwords import hash_password
 from .security.sessions import purge_expired
 from .services import audit
 from .services.knowledge import init_kb, seed_versions
+from .services.rbac import ensure_default_roles
 
 log = logging.getLogger("app")
 BASE = Path(__file__).parent
@@ -78,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     with session_scope() as db:
         seed_versions(db, kb)
         purge_expired(db)
+        ensure_default_roles(db)
     bootstrap_admin(settings)
     if settings.seed_demo_data:
         seed_demo(settings)
@@ -90,7 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     (media / "photos").mkdir(parents=True, exist_ok=True)
     app.mount("/media", StaticFiles(directory=str(media)), name="media")
 
-    for r in (health.router, webhooks.router, copilot.router, panel.router, admin_auth.router, admin_pages.router):
+    for r in (health.router, webhooks.router, copilot.router, panel.router, admin_auth.router, admin_contacts.router, admin_pages.router):
         app.include_router(r)
 
     def _is_htmx(request: Request) -> bool:
@@ -123,5 +125,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(PanelUnauthorized)
     async def _panel_unauth(request: Request, exc: PanelUnauthorized):
         return JSONResponse({"error": exc.reason}, status_code=401)
+
+    @app.exception_handler(PanelForbidden)
+    async def _panel_forbidden(request: Request, exc: PanelForbidden):
+        if request.headers.get("hx-request") == "true":
+            # 200 so htmx swaps the message in; the reason is in the body.
+            return HTMLResponse("<p class='text-red-700'>Your role doesn't allow this. Ask an admin to add the Chatwoot panel permission to your role.</p>", headers={"X-Panel-Access": "forbidden"})
+        return JSONResponse({"error": "forbidden"}, status_code=403)
 
     return app

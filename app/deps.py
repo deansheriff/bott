@@ -15,21 +15,9 @@ from .security.sessions import cookie_name, load_session, unsign_token
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
-# Server-side role enforcement. Staff: knowledge, menu, hours, analytics (per spec) + overview/profile.
-PERMISSIONS: dict[str, set[str]] = {
-    "overview": {"admin", "staff"},
-    "profile": {"admin", "staff"},
-    "knowledge": {"admin", "staff"},
-    "menu": {"admin", "staff"},
-    "hours": {"admin", "staff"},
-    "analytics": {"admin", "staff"},
-    "bot_switch": {"admin"},
-    "zones": {"admin"},
-    "playground": {"admin"},
-    "settings": {"admin"},
-    "users": {"admin"},
-    "audit": {"admin"},
-}
+# Server-side RBAC: every route names the permission it needs ("<area>.<action>", see
+# security/permissions.py). Permissions come from the user's role on every request, so
+# changing a role takes effect immediately.
 
 
 class LoginRequired(Exception):
@@ -54,18 +42,29 @@ class PanelUnauthorized(Exception):
         self.reason = reason
 
 
+class PanelForbidden(Exception):
+    """Logged in, but the user's role lacks the panel permission."""
+
+
 @dataclass
 class Auth:
     user: User
     session: AuthSession
     ip: str
+    perms: frozenset = frozenset()
 
     @property
     def csrf(self) -> str:
         return self.session.csrf_token
 
     def can(self, perm: str) -> bool:
-        return self.user.role in PERMISSIONS.get(perm, set())
+        return perm in self.perms
+
+
+def _perms(db: Session, user: User) -> frozenset:
+    from .services.rbac import user_permissions
+
+    return user_permissions(db, user)
 
 
 def csrf_matches(expected: str | None, provided: str | None) -> bool:
@@ -109,12 +108,13 @@ def require(perm: str | None = None, allow_password_change: bool = False):
         user = sess.user
         if user.must_change_password and not allow_password_change:
             raise PasswordChangeRequired()
-        if perm and user.role not in PERMISSIONS.get(perm, set()):
+        perms = _perms(db, user)
+        if perm and perm not in perms:
             raise Forbidden()
         if request.method not in SAFE_METHODS:
             if not same_origin(request) or not csrf_matches(sess.csrf_token, await _provided_csrf(request)):
                 raise CSRFFailed()
-        return Auth(user=user, session=sess, ip=client_ip(request))
+        return Auth(user=user, session=sess, ip=client_ip(request), perms=perms)
 
     return dependency
 
@@ -126,21 +126,24 @@ def bearer_session(request: Request, db: Session) -> AuthSession | None:
     return load_session(db, header[7:].strip(), "panel")
 
 
-def require_panel():
+def require_panel(perm: str = "panel.view"):
     async def dependency(request: Request, db: Session = Depends(get_db)) -> Auth:
         sess = bearer_session(request, db)
         if sess is None:
             raise PanelUnauthorized()
         if sess.user.must_change_password:
             raise PanelUnauthorized("password_change_required")
+        perms = _perms(db, sess.user)
+        if perm not in perms:
+            raise PanelForbidden()
         if request.method not in SAFE_METHODS and not csrf_matches(sess.csrf_token, request.headers.get("x-csrf-token")):
             raise CSRFFailed()
-        return Auth(user=sess.user, session=sess, ip=client_ip(request))
+        return Auth(user=sess.user, session=sess, ip=client_ip(request), perms=perms)
 
     return dependency
 
 
-def require_panel_or_web():
+def require_panel_or_web(perm: str = "panel.act"):
     """For /copilot/* which serves both the iframe (bearer) and the admin site (cookie)."""
 
     async def dependency(request: Request, db: Session = Depends(get_db)) -> Auth:
@@ -153,8 +156,11 @@ def require_panel_or_web():
             raise PanelUnauthorized()
         if sess.user.must_change_password:
             raise PanelUnauthorized("password_change_required")
+        perms = _perms(db, sess.user)
+        if perm not in perms:
+            raise PanelForbidden()
         if request.method not in SAFE_METHODS and not csrf_matches(sess.csrf_token, await _provided_csrf(request)):
             raise CSRFFailed()
-        return Auth(user=sess.user, session=sess, ip=client_ip(request))
+        return Auth(user=sess.user, session=sess, ip=client_ip(request), perms=perms)
 
     return dependency

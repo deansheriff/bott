@@ -2,7 +2,8 @@
 {% set active = "users" %}
 {% block title %}Users{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold mb-4">Users</h1>
+<h1 class="text-2xl font-semibold mb-1">Users</h1>
+<p class="text-sm text-slate-600 mb-4">What each role can do is set on <a class="underline" href="/admin/roles">Roles</a>. You can only manage users whose access doesn't exceed yours, and only assign roles you could grant yourself.</p>
 {% if error %}<p class="mb-3 text-sm bg-red-50 text-red-700 p-2 rounded">{{ error }}</p>{% endif %}
 {% if link %}
   <div class="mb-4 text-sm bg-blue-50 border border-blue-200 p-3 rounded">
@@ -12,25 +13,38 @@
 {% endif %}
 <table class="w-full bg-white shadow rounded text-sm mb-6">
   <thead class="text-left text-slate-500"><tr><th class="p-2">Email</th><th class="p-2">Role</th><th class="p-2">Status</th><th class="p-2">Chatwoot</th><th class="p-2">Last login</th><th></th></tr></thead>
-  {% for u in users %}
+  {% for u in users %}{% set mine = u.id == user.id %}{% set manage = u.id in manageable and can("users.edit") %}
   <tr class="border-t">
-    <td class="p-2">{{ u.email }}</td>
-    <td class="p-2"><form method="post" action="/admin/users/{{ u.id }}/role" class="flex gap-1"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <select name="role" class="border rounded px-1">{% for r in roles %}<option {% if r == u.role %}selected{% endif %}>{{ r }}</option>{% endfor %}</select><button class="underline">Set</button></form></td>
+    <td class="p-2">{{ u.email }}{% if mine %} <span class="text-xs text-slate-500">(you)</span>{% endif %}</td>
+    <td class="p-2">
+      {% if manage %}
+      <form method="post" action="/admin/users/{{ u.id }}/role" class="flex gap-1"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <select name="role" class="border rounded px-1">
+          {% for r in roles %}{% if r.name in grantable or r.name == u.role %}<option {% if r.name == u.role %}selected{% endif %} {% if r.name not in grantable %}disabled{% endif %}>{{ r.name }}</option>{% endif %}{% endfor %}
+        </select><button class="underline">Set</button></form>
+      {% else %}{{ u.role }}{% endif %}
+    </td>
     <td class="p-2">{{ "Active" if u.is_active else "Disabled" }}{% if not u.password_hash %} · invite pending{% endif %}</td>
     <td class="p-2">{{ "connected" if u.chatwoot_token_enc else "—" }}</td>
     <td class="p-2">{{ u.last_login_at|local if u.last_login_at else "—" }}</td>
     <td class="p-2 text-right whitespace-nowrap">
-      <form method="post" action="/admin/users/{{ u.id }}/reset" class="inline" data-confirm="Issue a password reset link for {{ u.email }}? Their sessions will be signed out."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="underline">Reset password</button></form>
-      {% if u.id != user.id %}<form method="post" action="/admin/users/{{ u.id }}/active" class="inline" data-confirm="{{ 'Disable' if u.is_active else 'Enable' }} {{ u.email }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="underline ml-2 {% if u.is_active %}text-red-700{% endif %}">{{ "Disable" if u.is_active else "Enable" }}</button></form>{% endif %}
+      {% if manage %}
+        <form method="post" action="/admin/users/{{ u.id }}/reset" class="inline" data-confirm="Issue a password reset link for {{ u.email }}? Their sessions will be signed out."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="underline">Reset password</button></form>
+        <form method="post" action="/admin/users/{{ u.id }}/active" class="inline" data-confirm="{{ 'Disable' if u.is_active else 'Enable' }} {{ u.email }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="underline ml-2">{{ "Disable" if u.is_active else "Enable" }}</button></form>
+      {% endif %}
+      {% if u.id in manageable and can("users.delete") %}
+        <form method="post" action="/admin/users/{{ u.id }}/delete" class="inline" data-confirm="Permanently delete {{ u.email }}? They lose access at once. The audit log keeps their history. This can't be undone."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-red-700 underline ml-2">Delete</button></form>
+      {% endif %}
     </td>
   </tr>
   {% endfor %}
 </table>
+{% if can("users.edit") %}
 <form method="post" action="/admin/users/invite" class="bg-white shadow rounded p-4 flex gap-2 items-end text-sm">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label class="flex-1">Email<input name="email" type="email" required class="block w-full border rounded px-2 py-1"></label>
-  <label>Role<select name="role" class="block border rounded px-1 py-1">{% for r in roles %}<option {% if r == "staff" %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></label>
+  <label>Role<select name="role" class="block border rounded px-1 py-1">{% for r in grantable %}<option {% if r == "staff" %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></label>
   <button class="bg-slate-900 text-white rounded px-3 py-1">Invite</button>
 </form>
+{% endif %}
 {% endblock %}

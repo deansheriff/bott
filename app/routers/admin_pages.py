@@ -21,8 +21,8 @@ from ..config import get_settings
 from ..db import get_db
 from ..deps import Auth, require
 from ..models import (
-    ROLES,
     AuditLog,
+    AuthSession,
     BotTurn,
     ConversationState,
     DateOverride,
@@ -31,21 +31,25 @@ from ..models import (
     LLMUsage,
     MenuItem,
     MessageLog,
+    PanelLink,
+    Role,
     ToolCallLog,
     User,
     UserToken,
     WebhookEvent,
     WeeklyHours,
 )
+from ..security.permissions import ACTION_LABELS, ADMIN_ROLE, AREAS, clean
 from ..security.sessions import revoke_user_sessions
-from ..services import audit, settings_store
+from ..services import audit, rbac, settings_store
 from ..services.answer import generate_answer
 from ..services.chatwoot import connection_test
 from ..services.handoff import post_answer_check, pre_answer_check
 from ..services.hours import DAY_NAMES, opening_status, valid_hhmm
 from ..services.importer import ImportErrorUser, convert_upload, suggest_filename
+from ..services.rbac import can_grant
 from ..services.simulate import TranscriptError, simulate
-from ..services.knowledge import FILENAME_RE, get_kb, render_markdown_safe, save_version, unified_diff
+from ..services.knowledge import FILENAME_RE, get_kb, latest_version_no, render_markdown_safe, save_version, unified_diff
 from ..services.llm import DEFAULT_MODELS, PROVIDERS, LLMError, key_configured, model_matches
 from ..services.spend import SpendCapReached, local_day_bounds_utc, spend_today
 from ..templating import render
@@ -75,7 +79,7 @@ def _money(value: str) -> Decimal | None:
 
 # ================================================================== overview
 @router.get("/", response_class=HTMLResponse)
-def overview(request: Request, auth: Auth = Depends(require("overview")), db: Session = Depends(get_db)):
+def overview(request: Request, auth: Auth = Depends(require("overview.view")), db: Session = Depends(get_db)):
     start, end = local_day_bounds_utc(settings_store.get_setting(db, "timezone"))
     today_turns = db.query(BotTurn).filter(BotTurn.created_at >= start, BotTurn.dry_run.is_(False))
     handed = {t.conversation_id for t in today_turns.filter(BotTurn.handoff.is_(True)).all()}
@@ -101,7 +105,7 @@ def overview(request: Request, auth: Auth = Depends(require("overview")), db: Se
 
 
 @router.post("/bot-switch")
-def bot_switch(request: Request, value: str = Form(...), auth: Auth = Depends(require("bot_switch")), db: Session = Depends(get_db)):
+def bot_switch(request: Request, value: str = Form(...), auth: Auth = Depends(require("bot_switch.edit")), db: Session = Depends(get_db)):
     value = value.upper()
     if value not in settings_store.BOT_SWITCH_VALUES:
         return RedirectResponse("/admin/", status_code=303)
@@ -112,24 +116,76 @@ def bot_switch(request: Request, value: str = Form(...), auth: Auth = Depends(re
 
 
 # ================================================================== knowledge
-@router.get("/knowledge", response_class=HTMLResponse)
-def knowledge_list(request: Request, auth: Auth = Depends(require("knowledge")), db: Session = Depends(get_db)):
+def _knowledge_list(request: Request, db: Session, auth: Auth, error: str = "", flash: str = "", status: int = 200):
     kb = get_kb()
-    files = []
-    for name in kb.list_files():
-        versions = db.query(func.count(KnowledgeVersion.id)).filter(KnowledgeVersion.filename == name).scalar()
-        files.append({"name": name, "size": len(kb.read(name).encode()), "versions": versions})
-    return render(request, "admin/knowledge_list.html", {"files": files, "chunks": kb.chunk_count, "error": ""}, auth=auth, db=db)
+    on_disk = kb.list_files()
+    counts = dict(db.query(KnowledgeVersion.filename, func.count(KnowledgeVersion.id)).group_by(KnowledgeVersion.filename).all())
+    files = [{"name": n, "size": len(kb.read(n).encode()), "versions": counts.get(n, 0)} for n in on_disk]
+    deleted = []
+    for name in sorted(set(counts) - set(on_disk)):
+        last = db.query(KnowledgeVersion).filter(KnowledgeVersion.filename == name).order_by(KnowledgeVersion.version.desc()).first()
+        deleted.append({"name": name, "versions": counts[name], "last": last})
+    return render(request, "admin/knowledge_list.html", {"files": files, "deleted": deleted, "chunks": kb.chunk_count, "error": error, "flash": flash}, auth=auth, db=db, status_code=status)
+
+
+@router.get("/knowledge", response_class=HTMLResponse)
+def knowledge_list(request: Request, auth: Auth = Depends(require("knowledge.view")), db: Session = Depends(get_db)):
+    return _knowledge_list(request, db, auth)
+
+
+@router.post("/knowledge/{name}/delete", response_class=HTMLResponse)
+def knowledge_delete(request: Request, name: str, auth: Auth = Depends(require("knowledge.delete")), db: Session = Depends(get_db)):
+    """Remove a file from the bot. Its versions are kept so it can be restored (or purged)."""
+    kb = get_kb()
+    if not FILENAME_RE.match(name) or not kb.exists(name):
+        return _knowledge_list(request, db, auth, error="No such knowledge file.", status=404)
+    content = kb.read(name)
+    if latest_version_no(db, name) == 0:  # make sure there's something to restore from
+        save_version(db, kb, name, content, auth.user, "snapshot before delete")
+    kb.delete(name)
+    audit.record(db, auth.user, "knowledge.delete", "knowledge_file", name, {"sha256": sha256_hex(content), "bytes": len(content)}, None, auth.ip)
+    db.commit()
+    kb.reindex()
+    return _knowledge_list(request, db, auth, flash=f"{name} deleted. The bot no longer uses it. You can restore it from “Deleted files” below.")
+
+
+@router.post("/knowledge/deleted/{name}/restore", response_class=HTMLResponse)
+def knowledge_restore(request: Request, name: str, auth: Auth = Depends(require("knowledge.edit")), db: Session = Depends(get_db)):
+    kb = get_kb()
+    last = db.query(KnowledgeVersion).filter(KnowledgeVersion.filename == name).order_by(KnowledgeVersion.version.desc()).first() if FILENAME_RE.match(name) else None
+    if last is None or kb.exists(name):
+        return _knowledge_list(request, db, auth, error="Nothing to restore.", status=404)
+    v = save_version(db, kb, name, last.content, auth.user, f"restored from v{last.version}")
+    audit.record(db, auth.user, "knowledge.restore", "knowledge_file", name, None, {"version": v.version, "from_version": last.version}, auth.ip)
+    db.commit()
+    kb.reindex()
+    return _knowledge_list(request, db, auth, flash=f"{name} restored.")
+
+
+@router.post("/knowledge/deleted/{name}/purge", response_class=HTMLResponse)
+def knowledge_purge(request: Request, name: str, auth: Auth = Depends(require("knowledge.delete")), db: Session = Depends(get_db)):
+    """Permanently delete a deleted file's version history."""
+    kb = get_kb()
+    if not FILENAME_RE.match(name) or kb.exists(name):
+        return _knowledge_list(request, db, auth, error="Delete the file first; only deleted files can be purged.", status=400)
+    n = db.query(KnowledgeVersion).filter(KnowledgeVersion.filename == name).delete(synchronize_session=False)
+    if not n:
+        return _knowledge_list(request, db, auth, error="Nothing to purge.", status=404)
+    audit.record(db, auth.user, "knowledge.purge", "knowledge_file", name, {"versions": n}, None, auth.ip)
+    db.commit()
+    return _knowledge_list(request, db, auth, flash=f"{name} and its {n} version(s) were permanently deleted.")
 
 
 @router.post("/knowledge/new")
-def knowledge_new(request: Request, filename: str = Form(...), auth: Auth = Depends(require("knowledge")), db: Session = Depends(get_db)):
+def knowledge_new(request: Request, filename: str = Form(...), auth: Auth = Depends(require("knowledge.edit")), db: Session = Depends(get_db)):
     name = filename.strip().lower()
     if not name.endswith(".md"):
         name += ".md"
     kb = get_kb()
     if not FILENAME_RE.match(name) or kb.exists(name):
-        return render(request, "admin/knowledge_list.html", {"files": [], "chunks": kb.chunk_count, "error": "Invalid or existing filename."}, auth=auth, db=db, status_code=400)
+        return _knowledge_list(request, db, auth, error="Invalid or existing filename.", status=400)
+    if latest_version_no(db, name):
+        return _knowledge_list(request, db, auth, error=f"{name} is in “Deleted files”. Restore it, or purge it first.", status=400)
     v = save_version(db, kb, name, f"# {name[:-3].replace('-', ' ').title()}\n\nWrite here.\n", auth.user, "created")
     audit.record(db, auth.user, "knowledge.create", "knowledge_file", name, None, {"version": v.version}, auth.ip)
     db.commit()
@@ -138,7 +194,7 @@ def knowledge_new(request: Request, filename: str = Form(...), auth: Auth = Depe
 
 
 @router.post("/knowledge/reindex")
-def knowledge_reindex(request: Request, auth: Auth = Depends(require("knowledge")), db: Session = Depends(get_db)):
+def knowledge_reindex(request: Request, auth: Auth = Depends(require("knowledge.edit")), db: Session = Depends(get_db)):
     n = get_kb().reindex()
     audit.record(db, auth.user, "knowledge.reindex", "knowledge_index", None, None, {"chunks": n}, auth.ip)
     db.commit()
@@ -146,14 +202,13 @@ def knowledge_reindex(request: Request, auth: Auth = Depends(require("knowledge"
 
 
 @router.post("/knowledge/upload", response_class=HTMLResponse)
-async def knowledge_upload(request: Request, document: UploadFile | None = File(None), save_as: str = Form(""), auth: Auth = Depends(require("knowledge")), db: Session = Depends(get_db)):
+async def knowledge_upload(request: Request, document: UploadFile | None = File(None), save_as: str = Form(""), auth: Auth = Depends(require("knowledge.edit")), db: Session = Depends(get_db)):
     """Convert an uploaded PDF/DOCX/TXT/MD to Markdown and open it in the editor UNSAVED for review."""
     kb = get_kb()
     s = get_settings()
 
     def back(error: str, status: int = 400):
-        files = [{"name": n, "size": len(kb.read(n).encode()), "versions": db.query(func.count(KnowledgeVersion.id)).filter(KnowledgeVersion.filename == n).scalar()} for n in kb.list_files()]
-        return render(request, "admin/knowledge_list.html", {"files": files, "chunks": kb.chunk_count, "error": error}, auth=auth, db=db, status_code=status)
+        return _knowledge_list(request, db, auth, error=error, status=status)
 
     if document is None or not document.filename:
         return back("Choose a file to upload.")
@@ -189,7 +244,7 @@ async def knowledge_upload(request: Request, document: UploadFile | None = File(
 
 
 @router.post("/knowledge/preview", response_class=HTMLResponse)
-def knowledge_preview(request: Request, content: str = Form(""), auth: Auth = Depends(require("knowledge"))):
+def knowledge_preview(request: Request, content: str = Form(""), auth: Auth = Depends(require("knowledge.edit"))):
     return HTMLResponse(render_markdown_safe(content[: get_settings().max_knowledge_file_bytes]))
 
 
@@ -201,7 +256,7 @@ def _file_or_404(name: str):
 
 
 @router.get("/knowledge/{name}", response_class=HTMLResponse)
-def knowledge_edit(request: Request, name: str, auth: Auth = Depends(require("knowledge")), db: Session = Depends(get_db)):
+def knowledge_edit(request: Request, name: str, auth: Auth = Depends(require("knowledge.view")), db: Session = Depends(get_db)):
     kb = _file_or_404(name)
     if kb is None:
         return render(request, "admin/message.html", {"title": "Not found", "message": "No such knowledge file."}, auth=auth, db=db, status_code=404)
@@ -211,7 +266,7 @@ def knowledge_edit(request: Request, name: str, auth: Auth = Depends(require("kn
 
 
 @router.post("/knowledge/{name}", response_class=HTMLResponse)
-def knowledge_save(request: Request, name: str, content: str = Form(""), note: str = Form(""), create: str = Form(""), auth: Auth = Depends(require("knowledge")), db: Session = Depends(get_db)):
+def knowledge_save(request: Request, name: str, content: str = Form(""), note: str = Form(""), create: str = Form(""), auth: Auth = Depends(require("knowledge.edit")), db: Session = Depends(get_db)):
     kb = get_kb()
     exists = kb.exists(name)
     # New files are only created from the import flow (create=1); otherwise the file must exist.
@@ -238,7 +293,7 @@ def knowledge_save(request: Request, name: str, content: str = Form(""), note: s
 
 
 @router.get("/knowledge/{name}/versions/{version_id}", response_class=HTMLResponse)
-def knowledge_version(request: Request, name: str, version_id: int, auth: Auth = Depends(require("knowledge")), db: Session = Depends(get_db)):
+def knowledge_version(request: Request, name: str, version_id: int, auth: Auth = Depends(require("knowledge.view")), db: Session = Depends(get_db)):
     kb = _file_or_404(name)
     v = db.get(KnowledgeVersion, version_id)
     if kb is None or v is None or v.filename != name:
@@ -248,7 +303,7 @@ def knowledge_version(request: Request, name: str, version_id: int, auth: Auth =
 
 
 @router.post("/knowledge/{name}/versions/{version_id}/rollback")
-def knowledge_rollback(request: Request, name: str, version_id: int, auth: Auth = Depends(require("knowledge")), db: Session = Depends(get_db)):
+def knowledge_rollback(request: Request, name: str, version_id: int, auth: Auth = Depends(require("knowledge.edit")), db: Session = Depends(get_db)):
     kb = _file_or_404(name)
     v = db.get(KnowledgeVersion, version_id)
     if kb is None or v is None or v.filename != name:
@@ -263,14 +318,14 @@ def knowledge_rollback(request: Request, name: str, version_id: int, auth: Auth 
 
 # ================================================================== menu
 @router.get("/menu", response_class=HTMLResponse)
-def menu_list(request: Request, auth: Auth = Depends(require("menu")), db: Session = Depends(get_db)):
+def menu_list(request: Request, auth: Auth = Depends(require("menu.view")), db: Session = Depends(get_db)):
     items = db.query(MenuItem).order_by(MenuItem.category, MenuItem.name).all()
     return render(request, "admin/menu_list.html", {"items": items, "today": _today_local(db)}, auth=auth, db=db)
 
 
 @router.get("/menu/new", response_class=HTMLResponse)
 @router.get("/menu/{item_id}/edit", response_class=HTMLResponse)
-def menu_form(request: Request, item_id: int | None = None, auth: Auth = Depends(require("menu")), db: Session = Depends(get_db)):
+def menu_form(request: Request, item_id: int | None = None, auth: Auth = Depends(require("menu.edit")), db: Session = Depends(get_db)):
     item = db.get(MenuItem, item_id) if item_id else None
     return render(request, "admin/menu_form.html", {"item": item, "errors": [], "form": {}}, auth=auth, db=db)
 
@@ -297,6 +352,17 @@ async def _save_photo(upload: UploadFile | None) -> tuple[str | None, str | None
     return f"/media/photos/{name}", None
 
 
+_LOCAL_PHOTO_RE = re.compile(r"^/media/photos/([0-9a-f]{24}\.(?:jpg|png|webp))$")
+
+
+def _remove_local_photo(db: Session, url: str | None) -> None:
+    """Delete an uploaded photo file once no menu item uses it any more."""
+    m = _LOCAL_PHOTO_RE.match(url or "")
+    if not m or db.query(MenuItem).filter(MenuItem.photo_url == url).count():
+        return
+    (Path(get_settings().media_dir) / "photos" / m.group(1)).unlink(missing_ok=True)
+
+
 @router.post("/menu/save", response_class=HTMLResponse)
 async def menu_save(
     request: Request,
@@ -309,7 +375,7 @@ async def menu_save(
     description: str = Form(""),
     photo_url: str = Form(""),
     photo: UploadFile | None = File(None),
-    auth: Auth = Depends(require("menu")),
+    auth: Auth = Depends(require("menu.edit")),
     db: Session = Depends(get_db),
 ):
     errors = []
@@ -326,8 +392,10 @@ async def menu_save(
     if photo_err:
         errors.append(photo_err)
     if errors:
+        _remove_local_photo(db, uploaded)
         return render(request, "admin/menu_form.html", {"item": item, "errors": errors, "form": {"name": name, "category": category, "price": price, "description": description, "photo_url": photo_url}}, auth=auth, db=db, status_code=400)
     before = audit.model_snapshot(item, MENU_FIELDS) if item else None
+    old_photo = item.photo_url if item else None
     if item is None:
         item = MenuItem(name=name, price=p)
         db.add(item)
@@ -338,11 +406,13 @@ async def menu_save(
     db.flush()
     audit.record(db, auth.user, "menu.update" if before else "menu.create", "menu_item", item.id, before, audit.model_snapshot(item, MENU_FIELDS), auth.ip)
     db.commit()
+    if old_photo and old_photo != item.photo_url:
+        _remove_local_photo(db, old_photo)
     return RedirectResponse("/admin/menu", status_code=303)
 
 
 @router.post("/menu/{item_id}/toggle/{field}", response_class=HTMLResponse)
-def menu_toggle(request: Request, item_id: int, field: str, auth: Auth = Depends(require("menu")), db: Session = Depends(get_db)):
+def menu_toggle(request: Request, item_id: int, field: str, auth: Auth = Depends(require("menu.edit")), db: Session = Depends(get_db)):
     item = db.get(MenuItem, item_id)
     if item is None or field not in ("available", "eighty_six"):
         return HTMLResponse("Not found", status_code=404)
@@ -358,24 +428,26 @@ def menu_toggle(request: Request, item_id: int, field: str, auth: Auth = Depends
 
 
 @router.post("/menu/{item_id}/delete")
-def menu_delete(request: Request, item_id: int, auth: Auth = Depends(require("menu")), db: Session = Depends(get_db)):
+def menu_delete(request: Request, item_id: int, auth: Auth = Depends(require("menu.delete")), db: Session = Depends(get_db)):
     item = db.get(MenuItem, item_id)
     if item:
+        photo = item.photo_url
         audit.record(db, auth.user, "menu.delete", "menu_item", item.id, audit.model_snapshot(item, MENU_FIELDS), None, auth.ip)
         db.delete(item)
         db.commit()
+        _remove_local_photo(db, photo)
     return RedirectResponse("/admin/menu", status_code=303)
 
 
 # ================================================================== delivery zones
 @router.get("/zones", response_class=HTMLResponse)
-def zones_list(request: Request, edit: int | None = None, auth: Auth = Depends(require("zones")), db: Session = Depends(get_db)):
+def zones_list(request: Request, edit: int | None = None, auth: Auth = Depends(require("zones.view")), db: Session = Depends(get_db)):
     zones = db.query(DeliveryZone).order_by(DeliveryZone.name).all()
     return render(request, "admin/zones.html", {"zones": zones, "edit": db.get(DeliveryZone, edit) if edit else None, "errors": []}, auth=auth, db=db)
 
 
 @router.post("/zones/save", response_class=HTMLResponse)
-def zones_save(request: Request, zone_id: str = Form(""), name: str = Form(""), aliases: str = Form(""), fee: str = Form(""), min_order: str = Form("0"), active: str = Form(""), auth: Auth = Depends(require("zones")), db: Session = Depends(get_db)):
+def zones_save(request: Request, zone_id: str = Form(""), name: str = Form(""), aliases: str = Form(""), fee: str = Form(""), min_order: str = Form("0"), active: str = Form(""), auth: Auth = Depends(require("zones.edit")), db: Session = Depends(get_db)):
     zone = db.get(DeliveryZone, int(zone_id)) if zone_id.isdigit() else None
     f, m = _money(fee), _money(min_order or "0")
     errors = [e for e, bad in (("Name is required.", not name.strip()), ("Fee must be a valid amount.", f is None), ("Minimum order must be a valid amount.", m is None)) if bad]
@@ -395,7 +467,7 @@ def zones_save(request: Request, zone_id: str = Form(""), name: str = Form(""), 
 
 
 @router.post("/zones/{zone_id}/toggle")
-def zones_toggle(request: Request, zone_id: int, auth: Auth = Depends(require("zones")), db: Session = Depends(get_db)):
+def zones_toggle(request: Request, zone_id: int, auth: Auth = Depends(require("zones.edit")), db: Session = Depends(get_db)):
     zone = db.get(DeliveryZone, zone_id)
     if zone:
         before = audit.model_snapshot(zone, ZONE_FIELDS)
@@ -406,7 +478,7 @@ def zones_toggle(request: Request, zone_id: int, auth: Auth = Depends(require("z
 
 
 @router.post("/zones/{zone_id}/delete")
-def zones_delete(request: Request, zone_id: int, auth: Auth = Depends(require("zones")), db: Session = Depends(get_db)):
+def zones_delete(request: Request, zone_id: int, auth: Auth = Depends(require("zones.delete")), db: Session = Depends(get_db)):
     zone = db.get(DeliveryZone, zone_id)
     if zone:
         audit.record(db, auth.user, "zone.delete", "delivery_zone", zone.id, audit.model_snapshot(zone, ZONE_FIELDS), None, auth.ip)
@@ -417,7 +489,7 @@ def zones_delete(request: Request, zone_id: int, auth: Auth = Depends(require("z
 
 # ================================================================== hours
 @router.get("/hours", response_class=HTMLResponse)
-def hours_page(request: Request, auth: Auth = Depends(require("hours")), db: Session = Depends(get_db)):
+def hours_page(request: Request, auth: Auth = Depends(require("hours.view")), db: Session = Depends(get_db)):
     rows = {r.weekday: r for r in db.query(WeeklyHours).all()}
     overrides = db.query(DateOverride).filter(DateOverride.day >= _today_local(db) - timedelta(days=7)).order_by(DateOverride.day).all()
     status = opening_status(db, settings_store.get_setting(db, "timezone"))
@@ -425,7 +497,7 @@ def hours_page(request: Request, auth: Auth = Depends(require("hours")), db: Ses
 
 
 @router.post("/hours/weekly")
-async def hours_save(request: Request, auth: Auth = Depends(require("hours")), db: Session = Depends(get_db)):
+async def hours_save(request: Request, auth: Auth = Depends(require("hours.edit")), db: Session = Depends(get_db)):
     form = await request.form()
     before = {r.weekday: {"open": r.open_time, "close": r.close_time, "closed": r.closed} for r in db.query(WeeklyHours).all()}
     after = {}
@@ -444,7 +516,7 @@ async def hours_save(request: Request, auth: Auth = Depends(require("hours")), d
 
 
 @router.post("/hours/override")
-def override_add(request: Request, day: str = Form(...), closed: str = Form(""), open_time: str = Form(""), close_time: str = Form(""), note: str = Form(""), auth: Auth = Depends(require("hours")), db: Session = Depends(get_db)):
+def override_add(request: Request, day: str = Form(...), closed: str = Form(""), open_time: str = Form(""), close_time: str = Form(""), note: str = Form(""), auth: Auth = Depends(require("hours.edit")), db: Session = Depends(get_db)):
     try:
         d = date.fromisoformat(day)
     except ValueError:
@@ -462,7 +534,7 @@ def override_add(request: Request, day: str = Form(...), closed: str = Form(""),
 
 
 @router.post("/hours/override/{override_id}/delete")
-def override_delete(request: Request, override_id: int, auth: Auth = Depends(require("hours")), db: Session = Depends(get_db)):
+def override_delete(request: Request, override_id: int, auth: Auth = Depends(require("hours.delete")), db: Session = Depends(get_db)):
     row = db.get(DateOverride, override_id)
     if row:
         audit.record(db, auth.user, "hours.override_delete", "date_override", row.day.isoformat(), audit.model_snapshot(row, ["day", "closed", "open_time", "close_time", "note"]), None, auth.ip)
@@ -473,12 +545,12 @@ def override_delete(request: Request, override_id: int, auth: Auth = Depends(req
 
 # ================================================================== playground
 @router.get("/playground", response_class=HTMLResponse)
-def playground(request: Request, auth: Auth = Depends(require("playground")), db: Session = Depends(get_db)):
+def playground(request: Request, auth: Auth = Depends(require("playground.use")), db: Session = Depends(get_db)):
     return render(request, "admin/playground.html", {}, auth=auth, db=db)
 
 
 @router.post("/playground/run", response_class=HTMLResponse)
-def playground_run(request: Request, message: str = Form(""), phone: str = Form(""), auth: Auth = Depends(require("playground")), db: Session = Depends(get_db)):
+def playground_run(request: Request, message: str = Form(""), phone: str = Form(""), auth: Auth = Depends(require("playground.use")), db: Session = Depends(get_db)):
     """Runs the full decision pipeline with no Chatwoot calls."""
     message = message.strip()[:2000]
     ctx: dict = {"message": message, "answer": None, "decision": None, "error": ""}
@@ -512,7 +584,7 @@ def playground_simulate(
     phone: str = Form(""),
     contact_name: str = Form(""),
     mode: str = Form("auto"),
-    auth: Auth = Depends(require("playground")),
+    auth: Auth = Depends(require("playground.use")),
     db: Session = Depends(get_db),
 ):
     """Show the exact customer message and private notes a handoff would produce. Nothing is sent to Chatwoot."""
@@ -563,12 +635,12 @@ def _analytics(db: Session, days: int = 30) -> dict:
 
 
 @router.get("/analytics", response_class=HTMLResponse)
-def analytics(request: Request, days: int = 30, auth: Auth = Depends(require("analytics")), db: Session = Depends(get_db)):
+def analytics(request: Request, days: int = 30, auth: Auth = Depends(require("analytics.view")), db: Session = Depends(get_db)):
     return render(request, "admin/analytics.html", {"a": _analytics(db, max(1, min(days, 365)))}, auth=auth, db=db)
 
 
 @router.get("/analytics/export.csv")
-def analytics_export(report: str = "daily", days: int = 30, auth: Auth = Depends(require("analytics")), db: Session = Depends(get_db)):
+def analytics_export(report: str = "daily", days: int = 30, auth: Auth = Depends(require("analytics.view")), db: Session = Depends(get_db)):
     a = _analytics(db, max(1, min(days, 365)))
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -598,7 +670,7 @@ def _provider_info() -> list[dict]:
 
 
 @router.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request, auth: Auth = Depends(require("settings")), db: Session = Depends(get_db)):
+def settings_page(request: Request, auth: Auth = Depends(require("settings.view")), db: Session = Depends(get_db)):
     return render(request, "admin/settings.html", {"s": settings_store.all_settings(db), "errors": [], "flash": "", "providers": _provider_info()}, auth=auth, db=db)
 
 
@@ -635,7 +707,7 @@ def settings_save(
     qr_delivery: str = Form(""),
     qr_payment: str = Form(""),
     llm_price_overrides: str = Form("{}"),
-    auth: Auth = Depends(require("settings")),
+    auth: Auth = Depends(require("settings.edit")),
     db: Session = Depends(get_db),
 ):
     errors = []
@@ -691,7 +763,7 @@ def settings_save(
 
 
 @router.post("/settings/test-connection", response_class=HTMLResponse)
-def settings_test(request: Request, auth: Auth = Depends(require("settings")), db: Session = Depends(get_db)):
+def settings_test(request: Request, auth: Auth = Depends(require("settings.edit")), db: Session = Depends(get_db)):
     result = connection_test()
     audit.record(db, auth.user, "settings.connection_test", "chatwoot", None, None, {"reachable": result.get("reachable"), "bot_token_ok": result.get("bot_token_ok")}, auth.ip)
     db.commit()
@@ -699,9 +771,35 @@ def settings_test(request: Request, auth: Auth = Depends(require("settings")), d
 
 
 # ================================================================== users
+def _roles(db: Session) -> list[Role]:
+    return db.query(Role).order_by(Role.is_system.desc(), Role.name).all()
+
+
+def _grantable_roles(db: Session, auth: Auth) -> list[Role]:
+    return [r for r in _roles(db) if can_grant(auth.perms, rbac.effective(r))]
+
+
+def _can_manage(db: Session, auth: Auth, user: User) -> bool:
+    """You may only manage users whose access does not exceed yours (prevents takeover of admins)."""
+    return user.id != auth.user.id and can_grant(auth.perms, rbac.role_permissions(db, user.role))
+
+
+def _users_page(request, db, auth, link=None, error="", status=200):
+    users = db.query(User).order_by(User.email).all()
+    manageable = {u.id for u in users if _can_manage(db, auth, u)}
+    return render(
+        request,
+        "admin/users.html",
+        {"users": users, "roles": _roles(db), "grantable": [r.name for r in _grantable_roles(db, auth)], "manageable": manageable, "link": link, "error": error},
+        auth=auth,
+        db=db,
+        status_code=status,
+    )
+
+
 @router.get("/users", response_class=HTMLResponse)
-def users_page(request: Request, auth: Auth = Depends(require("users")), db: Session = Depends(get_db)):
-    return render(request, "admin/users.html", {"users": db.query(User).order_by(User.email).all(), "roles": ROLES, "link": None, "error": ""}, auth=auth, db=db)
+def users_page(request: Request, auth: Auth = Depends(require("users.view")), db: Session = Depends(get_db)):
+    return _users_page(request, db, auth)
 
 
 def _issue_link(db: Session, request: Request, user: User, purpose: str) -> str:
@@ -711,19 +809,25 @@ def _issue_link(db: Session, request: Request, user: User, purpose: str) -> str:
     return str(request.base_url).rstrip("/") + f"/admin/set-password/{raw}"
 
 
-def _users_page(request, db, auth, link=None, error="", status=200):
-    return render(request, "admin/users.html", {"users": db.query(User).order_by(User.email).all(), "roles": ROLES, "link": link, "error": error}, auth=auth, db=db, status_code=status)
-
-
-def _active_admins(db: Session) -> int:
-    return db.query(User).filter(User.role == "admin", User.is_active.is_(True)).count()
+def _managed_user(request, db, auth, user_id: int):
+    """Return (user, None) or (None, error response)."""
+    user = db.get(User, user_id)
+    if user is None:
+        return None, _users_page(request, db, auth, error="No such user.", status=404)
+    if user.id == auth.user.id:
+        return None, _users_page(request, db, auth, error="You can't change your own account here. Use My profile.", status=400)
+    if not _can_manage(db, auth, user):
+        return None, _users_page(request, db, auth, error="That user has access you don't have, so you can't manage them.", status=403)
+    return user, None
 
 
 @router.post("/users/invite", response_class=HTMLResponse)
-def users_invite(request: Request, email: str = Form(...), role: str = Form("staff"), auth: Auth = Depends(require("users")), db: Session = Depends(get_db)):
+def users_invite(request: Request, email: str = Form(...), role: str = Form("staff"), auth: Auth = Depends(require("users.edit")), db: Session = Depends(get_db)):
     email = email.strip().lower()
-    if not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}", email) or role not in ROLES:
-        return _users_page(request, db, auth, error="Enter a valid email and role.", status=400)
+    if not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}", email):
+        return _users_page(request, db, auth, error="Enter a valid email.", status=400)
+    if role not in [r.name for r in _grantable_roles(db, auth)]:
+        return _users_page(request, db, auth, error="You can't assign that role.", status=403)
     if db.query(User).filter(User.email == email).first():
         return _users_page(request, db, auth, error="A user with that email already exists.", status=400)
     user = User(email=email, role=role, is_active=True, must_change_password=False)
@@ -736,10 +840,10 @@ def users_invite(request: Request, email: str = Form(...), role: str = Form("sta
 
 
 @router.post("/users/{user_id}/reset", response_class=HTMLResponse)
-def users_reset(request: Request, user_id: int, auth: Auth = Depends(require("users")), db: Session = Depends(get_db)):
-    user = db.get(User, user_id)
-    if user is None:
-        return _users_page(request, db, auth, error="No such user.", status=404)
+def users_reset(request: Request, user_id: int, auth: Auth = Depends(require("users.edit")), db: Session = Depends(get_db)):
+    user, err = _managed_user(request, db, auth, user_id)
+    if err:
+        return err
     link = _issue_link(db, request, user, "reset")
     revoke_user_sessions(db, user.id)
     audit.record(db, auth.user, "user.password_reset_issued", "user", user.id, None, {"sessions_revoked": True}, auth.ip)
@@ -748,11 +852,13 @@ def users_reset(request: Request, user_id: int, auth: Auth = Depends(require("us
 
 
 @router.post("/users/{user_id}/role", response_class=HTMLResponse)
-def users_role(request: Request, user_id: int, role: str = Form(...), auth: Auth = Depends(require("users")), db: Session = Depends(get_db)):
-    user = db.get(User, user_id)
-    if user is None or role not in ROLES:
-        return _users_page(request, db, auth, error="Invalid request.", status=400)
-    if user.role == "admin" and role != "admin" and _active_admins(db) <= 1:
+def users_role(request: Request, user_id: int, role: str = Form(...), auth: Auth = Depends(require("users.edit")), db: Session = Depends(get_db)):
+    user, err = _managed_user(request, db, auth, user_id)
+    if err:
+        return err
+    if role not in [r.name for r in _grantable_roles(db, auth)]:
+        return _users_page(request, db, auth, error="You can't assign that role.", status=403)
+    if user.role == ADMIN_ROLE and role != ADMIN_ROLE and user.is_active and rbac.active_admin_count(db) <= 1:
         return _users_page(request, db, auth, error="Cannot demote the last active admin.", status=400)
     before = user.public_dict()
     user.role = role
@@ -762,13 +868,11 @@ def users_role(request: Request, user_id: int, role: str = Form(...), auth: Auth
 
 
 @router.post("/users/{user_id}/active", response_class=HTMLResponse)
-def users_active(request: Request, user_id: int, auth: Auth = Depends(require("users")), db: Session = Depends(get_db)):
-    user = db.get(User, user_id)
-    if user is None:
-        return _users_page(request, db, auth, error="No such user.", status=404)
-    if user.id == auth.user.id:
-        return _users_page(request, db, auth, error="You cannot disable your own account.", status=400)
-    if user.is_active and user.role == "admin" and _active_admins(db) <= 1:
+def users_active(request: Request, user_id: int, auth: Auth = Depends(require("users.edit")), db: Session = Depends(get_db)):
+    user, err = _managed_user(request, db, auth, user_id)
+    if err:
+        return err
+    if user.is_active and user.role == ADMIN_ROLE and rbac.active_admin_count(db) <= 1:
         return _users_page(request, db, auth, error="Cannot disable the last active admin.", status=400)
     before = user.public_dict()
     user.is_active = not user.is_active
@@ -779,9 +883,99 @@ def users_active(request: Request, user_id: int, auth: Auth = Depends(require("u
     return _users_page(request, db, auth)
 
 
+@router.post("/users/{user_id}/delete", response_class=HTMLResponse)
+def users_delete(request: Request, user_id: int, auth: Auth = Depends(require("users.delete")), db: Session = Depends(get_db)):
+    user, err = _managed_user(request, db, auth, user_id)
+    if err:
+        return err
+    if user.role == ADMIN_ROLE and user.is_active and rbac.active_admin_count(db) <= 1:
+        return _users_page(request, db, auth, error="Cannot delete the last active admin.", status=400)
+    before = user.public_dict()
+    # SQLite doesn't enforce ON DELETE CASCADE by default, so remove dependants explicitly.
+    db.query(AuthSession).filter(AuthSession.user_id == user.id).delete(synchronize_session=False)
+    db.query(UserToken).filter(UserToken.user_id == user.id).delete(synchronize_session=False)
+    db.query(PanelLink).filter(PanelLink.user_id == user.id).delete(synchronize_session=False)
+    db.delete(user)
+    audit.record(db, auth.user, "user.delete", "user", user_id, before, None, auth.ip)
+    db.commit()
+    return _users_page(request, db, auth)
+
+
+# ================================================================== roles
+def _roles_page(request, db, auth, edit: Role | None = None, form: dict | None = None, error: str = "", flash: str = "", status: int = 200):
+    return render(
+        request,
+        "admin/roles.html",
+        {"roles": rbac.roles_with_counts(db), "areas": AREAS, "action_labels": ACTION_LABELS, "edit": edit, "form": form, "error": error, "flash": flash, "effective": rbac.effective, "admin_role": ADMIN_ROLE},
+        auth=auth,
+        db=db,
+        status_code=status,
+    )
+
+
+@router.get("/roles", response_class=HTMLResponse)
+def roles_page(request: Request, edit: int | None = None, auth: Auth = Depends(require("roles.view")), db: Session = Depends(get_db)):
+    role = db.get(Role, edit) if edit else None
+    if role is not None and role.is_system:
+        role = None
+    return _roles_page(request, db, auth, edit=role)
+
+
+@router.post("/roles/save", response_class=HTMLResponse)
+async def roles_save(request: Request, auth: Auth = Depends(require("roles.edit")), db: Session = Depends(get_db)):
+    form = await request.form()
+    role_id = str(form.get("role_id") or "")
+    name = str(form.get("name") or "").strip().lower()
+    description = str(form.get("description") or "").strip()[:255]
+    perms = clean(form.getlist("perms"))
+    role = db.get(Role, int(role_id)) if role_id.isdigit() else None
+    state = {"name": name, "description": description, "perms": perms}
+    if role is not None and role.is_system:
+        return _roles_page(request, db, auth, error="The built-in admin role can't be changed.", status=400)
+    if not rbac.ROLE_NAME_RE.match(name):
+        return _roles_page(request, db, auth, edit=role, form=state, error="Role name: 2-32 lowercase letters, digits, '-' or '_', starting with a letter.", status=400)
+    clash = db.query(Role).filter(Role.name == name).one_or_none()
+    if clash is not None and (role is None or clash.id != role.id):
+        return _roles_page(request, db, auth, edit=role, form=state, error="A role with that name already exists.", status=400)
+    if not can_grant(auth.perms, perms):
+        return _roles_page(request, db, auth, edit=role, form=state, error="You can only give a role permissions you have yourself.", status=403)
+    if role is not None and not can_grant(auth.perms, rbac.effective(role)):
+        return _roles_page(request, db, auth, error="That role has access you don't have, so you can't edit it.", status=403)
+    before = {"name": role.name, "description": role.description, "permissions": rbac.effective(role)} if role else None
+    if role is None:
+        role = Role(name=name, description=description, permissions=perms)
+        db.add(role)
+    else:
+        if role.name != name:
+            db.query(User).filter(User.role == role.name).update({User.role: name}, synchronize_session=False)
+        role.name, role.description, role.permissions = name, description, perms
+    db.flush()
+    audit.record(db, auth.user, "role.update" if before else "role.create", "role", role.id, before, {"name": name, "description": description, "permissions": perms}, auth.ip)
+    db.commit()
+    return _roles_page(request, db, auth, flash=f"Role “{name}” saved. Changes apply on users' next click.")
+
+
+@router.post("/roles/{role_id}/delete", response_class=HTMLResponse)
+def roles_delete(request: Request, role_id: int, auth: Auth = Depends(require("roles.delete")), db: Session = Depends(get_db)):
+    role = db.get(Role, role_id)
+    if role is None:
+        return _roles_page(request, db, auth, error="No such role.", status=404)
+    if role.is_system:
+        return _roles_page(request, db, auth, error="The built-in admin role can't be deleted.", status=400)
+    if not can_grant(auth.perms, rbac.effective(role)):
+        return _roles_page(request, db, auth, error="That role has access you don't have, so you can't delete it.", status=403)
+    in_use = db.query(User).filter(User.role == role.name).count()
+    if in_use:
+        return _roles_page(request, db, auth, error=f"{in_use} user(s) still have the “{role.name}” role. Give them another role first.", status=400)
+    audit.record(db, auth.user, "role.delete", "role", role.id, {"name": role.name, "permissions": rbac.effective(role)}, None, auth.ip)
+    db.delete(role)
+    db.commit()
+    return _roles_page(request, db, auth, flash="Role deleted.")
+
+
 # ================================================================== audit
 @router.get("/audit", response_class=HTMLResponse)
-def audit_page(request: Request, user: str = "", entity: str = "", action: str = "", since: str = "", until: str = "", page: int = 1, auth: Auth = Depends(require("audit")), db: Session = Depends(get_db)):
+def audit_page(request: Request, user: str = "", entity: str = "", action: str = "", since: str = "", until: str = "", page: int = 1, auth: Auth = Depends(require("audit.view")), db: Session = Depends(get_db)):
     q = db.query(AuditLog)
     if user:
         q = q.filter(AuditLog.user_email.ilike(f"%{user[:100]}%"))

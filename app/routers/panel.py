@@ -196,17 +196,17 @@ def _set_status(request: Request, db: Session, auth: Auth, conversation_id: int,
 
 
 @router.post("/api/conversations/{conversation_id}/takeover", response_class=HTMLResponse)
-def takeover(request: Request, conversation_id: int, auth: Auth = Depends(require_panel()), db: Session = Depends(get_db)):
+def takeover(request: Request, conversation_id: int, auth: Auth = Depends(require_panel("panel.act")), db: Session = Depends(get_db)):
     return _set_status(request, db, auth, conversation_id, "open", "paused", "panel.takeover")
 
 
 @router.post("/api/conversations/{conversation_id}/return-to-bot", response_class=HTMLResponse)
-def return_to_bot(request: Request, conversation_id: int, auth: Auth = Depends(require_panel()), db: Session = Depends(get_db)):
+def return_to_bot(request: Request, conversation_id: int, auth: Auth = Depends(require_panel("panel.act")), db: Session = Depends(get_db)):
     return _set_status(request, db, auth, conversation_id, "pending", "active", "panel.return_to_bot")
 
 
 @router.post("/api/conversations/{conversation_id}/draft", response_class=HTMLResponse)
-def generate_draft(request: Request, conversation_id: int, auth: Auth = Depends(require_panel()), db: Session = Depends(get_db)):
+def generate_draft(request: Request, conversation_id: int, auth: Auth = Depends(require_panel("panel.act")), db: Session = Depends(get_db)):
     try:
         info = verify_access(auth, conversation_id)
     except NoAccess as exc:
@@ -234,7 +234,7 @@ def generate_draft(request: Request, conversation_id: int, auth: Auth = Depends(
 
 
 @router.post("/api/conversations/{conversation_id}/send", response_class=HTMLResponse)
-def send_as_agent(request: Request, conversation_id: int, content: str = Form(...), private: str = Form("0"), auth: Auth = Depends(require_panel()), db: Session = Depends(get_db)):
+def send_as_agent(request: Request, conversation_id: int, content: str = Form(...), private: str = Form("0"), auth: Auth = Depends(require_panel("panel.act")), db: Session = Depends(get_db)):
     content = content.strip()
     is_private = private == "1"
     if not content or len(content) > 4000:
@@ -261,7 +261,7 @@ def save_memory(
     preferences: str = Form(""),
     notes: str = Form(""),
     last_orders: str = Form(""),
-    auth: Auth = Depends(require_panel()),
+    auth: Auth = Depends(require_panel("panel.act")),
     db: Session = Depends(get_db),
 ):
     try:

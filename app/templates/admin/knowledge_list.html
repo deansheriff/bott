@@ -4,19 +4,37 @@
 {% block content %}
 <div class="flex items-center justify-between mb-4">
   <h1 class="text-2xl font-semibold">Knowledge</h1>
-  <form method="post" action="/admin/knowledge/reindex"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="border rounded px-3 py-1 text-sm">Reindex ({{ chunks }} chunks)</button></form>
+  {% if can("knowledge.edit") %}<form method="post" action="/admin/knowledge/reindex"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="border rounded px-3 py-1 text-sm">Reindex ({{ chunks }} chunks)</button></form>{% endif %}
 </div>
+{% if flash %}<p class="mb-3 text-sm bg-green-50 text-green-800 p-2 rounded">{{ flash }}</p>{% endif %}
 {% if error %}<p class="mb-3 text-sm bg-red-50 text-red-700 p-2 rounded">{{ error }}</p>{% endif %}
 <table class="w-full bg-white shadow rounded text-sm">
-  <thead class="text-left text-slate-500"><tr><th class="p-2">File</th><th class="p-2">Size</th><th class="p-2">Versions</th></tr></thead>
+  <thead class="text-left text-slate-500"><tr><th class="p-2">File</th><th class="p-2">Size</th><th class="p-2">Versions</th><th></th></tr></thead>
   <tbody>
   {% for f in files %}
-    <tr class="border-t"><td class="p-2"><a class="underline" href="/admin/knowledge/{{ f.name }}">{{ f.name }}</a></td><td class="p-2">{{ "{:,}".format(f.size) }} B</td><td class="p-2">{{ f.versions }}</td></tr>
+    <tr class="border-t"><td class="p-2"><a class="underline" href="/admin/knowledge/{{ f.name }}">{{ f.name }}</a></td><td class="p-2">{{ "{:,}".format(f.size) }} B</td><td class="p-2">{{ f.versions }}</td>
+      <td class="p-2 text-right">{% if can("knowledge.delete") %}<form method="post" action="/admin/knowledge/{{ f.name }}/delete" class="inline" data-confirm="Delete {{ f.name }}? The bot stops using it straight away. You can restore it later from Deleted files."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-red-700 underline">Delete</button></form>{% endif %}</td></tr>
   {% else %}
-    <tr><td class="p-2 text-slate-500" colspan="3">No knowledge files yet.</td></tr>
+    <tr><td class="p-2 text-slate-500" colspan="4">No knowledge files yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>
+
+{% if deleted %}
+<h2 class="font-semibold mt-6 mb-2">Deleted files</h2>
+<p class="text-xs text-slate-500 mb-2">Not used by the bot. Their version history is kept so you can bring them back.</p>
+<table class="w-full bg-white shadow rounded text-sm">
+  {% for d in deleted %}
+  <tr class="border-t"><td class="p-2">{{ d.name }}</td><td class="p-2 text-slate-500">{{ d.versions }} version(s){% if d.last %}, last saved {{ d.last.created_at|local }} by {{ d.last.created_by }}{% endif %}</td>
+    <td class="p-2 text-right whitespace-nowrap">
+      {% if can("knowledge.edit") %}<form method="post" action="/admin/knowledge/deleted/{{ d.name }}/restore" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="underline">Restore</button></form>{% endif %}
+      {% if can("knowledge.delete") %}<form method="post" action="/admin/knowledge/deleted/{{ d.name }}/purge" class="inline" data-confirm="Permanently delete {{ d.name }} and all {{ d.versions }} of its versions? This can't be undone."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-red-700 underline ml-2">Delete forever</button></form>{% endif %}
+    </td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if can("knowledge.edit") %}
 <form method="post" action="/admin/knowledge/upload" enctype="multipart/form-data" class="mt-4 bg-white shadow rounded p-4 space-y-2 text-sm">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <h2 class="font-semibold">Import a document</h2>
@@ -33,4 +51,5 @@
   <input name="filename" required pattern="[a-z0-9][a-z0-9_\-]{0,60}(\.md)?" placeholder="new-file.md" class="border rounded px-2 py-1 text-sm">
   <button class="bg-slate-900 text-white rounded px-3 text-sm">Create file</button>
 </form>
+{% endif %}
 {% endblock %}

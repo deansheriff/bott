@@ -1,0 +1,56 @@
+{% extends "admin/layout.html" %}
+{% set active = "roles" %}
+{% block title %}Roles{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-1">Roles</h1>
+<p class="text-sm text-slate-600 mb-4">A role is a set of permissions. Each user has one role (set it on <a class="underline" href="/admin/users">Users</a>). Changes apply on the user's next click. You can only give a role permissions you have yourself.</p>
+{% if flash %}<p class="mb-3 text-sm bg-green-50 text-green-800 p-2 rounded">{{ flash }}</p>{% endif %}
+{% if error %}<p class="mb-3 text-sm bg-red-50 text-red-700 p-2 rounded">{{ error }}</p>{% endif %}
+
+<table class="w-full bg-white shadow rounded text-sm mb-6">
+  <thead class="text-left text-slate-500"><tr><th class="p-2">Role</th><th class="p-2">Users</th><th class="p-2">Permissions</th><th></th></tr></thead>
+  {% for role, count in roles %}
+  <tr class="border-t align-top">
+    <td class="p-2"><strong>{{ role.name }}</strong>{% if role.is_system %} <span class="text-xs bg-slate-200 rounded px-1">built-in</span>{% endif %}<div class="text-xs text-slate-500">{{ role.description }}</div></td>
+    <td class="p-2">{{ count }}</td>
+    <td class="p-2 text-xs text-slate-600">{% if role.name == admin_role %}Everything{% else %}{{ effective(role)|join(", ") or "None" }}{% endif %}</td>
+    <td class="p-2 text-right whitespace-nowrap">
+      {% if not role.is_system %}
+        {% if can("roles.edit") %}<a class="underline" href="/admin/roles?edit={{ role.id }}">Edit</a>{% endif %}
+        {% if can("roles.delete") %}<form method="post" action="/admin/roles/{{ role.id }}/delete" class="inline" data-confirm="Delete the role {{ role.name }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-red-700 underline ml-2">Delete</button></form>{% endif %}
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+{% if can("roles.edit") %}
+{% set current = form.perms if form else (effective(edit) if edit else []) %}
+<form method="post" action="/admin/roles/save" class="bg-white shadow rounded p-4 space-y-3 text-sm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="role_id" value="{{ edit.id if edit else '' }}">
+  <h2 class="font-semibold">{{ "Edit role " ~ edit.name if edit else "New role" }}</h2>
+  <div class="grid md:grid-cols-2 gap-3">
+    <label>Name<input name="name" required pattern="[a-z][a-z0-9_\-]{1,31}" value="{{ form.name if form else (edit.name if edit else '') }}" placeholder="e.g. kitchen-manager" class="mt-1 w-full border rounded px-2 py-1"></label>
+    <label>Description<input name="description" maxlength="255" value="{{ form.description if form else (edit.description if edit else '') }}" class="mt-1 w-full border rounded px-2 py-1"></label>
+  </div>
+  <table class="w-full">
+    <thead class="text-left text-slate-500 text-xs"><tr><th class="py-1">Area</th>{% for a in ["view", "edit", "delete", "use", "act"] %}<th class="py-1 text-center">{{ action_labels[a] }}</th>{% endfor %}</tr></thead>
+    {% for key, label, actions, help in areas %}
+    <tr class="border-t">
+      <td class="py-1 pr-2">{{ label }}<div class="text-xs text-slate-500">{{ help }}</div></td>
+      {% for a in ["view", "edit", "delete", "use", "act"] %}
+        <td class="text-center">
+        {% if a in actions %}{% set perm = key ~ "." ~ a %}
+          <input type="checkbox" name="perms" value="{{ perm }}" {% if perm in current %}checked{% endif %} {% if not can(perm) %}disabled title="You don't have this permission, so you can't grant it"{% endif %}>
+        {% endif %}
+        </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="text-xs text-slate-500">“Create & edit” and “Delete” include “View”. Greyed-out boxes are permissions you don't have.</p>
+  <div class="flex gap-2"><button class="bg-slate-900 text-white rounded px-4 py-1">Save role</button>{% if edit %}<a href="/admin/roles" class="border rounded px-3 py-1">Cancel</a>{% endif %}</div>
+</form>
+{% endif %}
+{% endblock %}

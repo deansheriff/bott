@@ -8,8 +8,8 @@
 <h2 class="font-semibold mb-2">Diff: current → v{{ v.version }}</h2>
 <pre class="bg-white border rounded p-3 text-xs overflow-auto max-h-[32rem]">{% for line in diff %}<span class="{% if line.startswith('+') and not line.startswith('+++') %}text-green-700{% elif line.startswith('-') and not line.startswith('---') %}text-red-700{% endif %}">{{ line }}</span>
 {% else %}No differences.{% endfor %}</pre>
-<form method="post" action="/admin/knowledge/{{ name }}/versions/{{ v.id }}/rollback" class="mt-4" data-confirm="Restore version {{ v.version }}? This creates a new version.">
+{% if can("knowledge.edit") %}<form method="post" action="/admin/knowledge/{{ name }}/versions/{{ v.id }}/rollback" class="mt-4" data-confirm="Restore version {{ v.version }}? This creates a new version.">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <button class="bg-slate-900 text-white rounded px-4 py-1 text-sm">Roll back to v{{ v.version }}</button>
-</form>
+</form>{% endif %}
 {% endblock %}

@@ -1,0 +1,51 @@
+{% extends "admin/layout.html" %}
+{% set active = "contacts" %}
+{% block title %}Customer {{ contact_id }}{% endblock %}
+{% block content %}
+<p class="text-sm mb-2"><a class="underline" href="/admin/contacts">← Customer data</a></p>
+<h1 class="text-2xl font-semibold mb-4">{{ (mem.name if mem else "") or "Customer" }} <span class="text-sm font-normal text-slate-500">Chatwoot contact #{{ contact_id }}</span></h1>
+{% if flash %}<p class="mb-3 text-sm bg-green-50 text-green-800 p-2 rounded">{{ flash }}</p>{% endif %}
+<div class="grid md:grid-cols-2 gap-4">
+  <section class="bg-white shadow rounded p-4 text-sm">
+    <h2 class="font-semibold mb-2">Memory</h2>
+    {% if mem %}
+    <form method="post" action="/admin/contacts/{{ contact_id }}" class="space-y-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% set ro = not can("contacts.edit") %}
+      <label class="block">Name<input name="name" value="{{ mem.name }}" {% if ro %}readonly{% endif %} class="w-full border rounded px-2 py-1"></label>
+      <label class="block">Phone<input name="phone" value="{{ mem.phone }}" {% if ro %}readonly{% endif %} class="w-full border rounded px-2 py-1"></label>
+      <label class="block">Preferred language<select name="preferred_language" {% if ro %}disabled{% endif %} class="w-full border rounded px-1 py-1">
+        {% for code, label in [("", "auto"), ("en", "English"), ("pcm", "Pidgin"), ("yo", "Yoruba")] %}<option value="{{ code }}" {% if mem.preferred_language == code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label class="block">Preferences<textarea name="preferences" rows="2" {% if ro %}readonly{% endif %} class="w-full border rounded px-2 py-1">{{ mem.preferences }}</textarea></label>
+      <label class="block">Notes<textarea name="notes" rows="3" {% if ro %}readonly{% endif %} class="w-full border rounded px-2 py-1">{{ mem.notes }}</textarea></label>
+      <label class="block">Last orders (one per line, max 5)<textarea name="last_orders" rows="3" {% if ro %}readonly{% endif %} class="w-full border rounded px-2 py-1">{% for o in mem.last_orders or [] %}{{ [o.ref, o.summary, o.date]|select|join(" · ") }}
+{% endfor %}</textarea></label>
+      {% if not ro %}<button class="bg-slate-900 text-white rounded px-3 py-1">Save</button>{% endif %}
+    </form>
+    {% if mem.summaries %}<h3 class="font-semibold mt-4 mb-1">Past conversation summaries</h3>
+      {% for s in mem.summaries|reverse %}<p class="text-xs mb-1"><span class="text-slate-500">{{ s.date }}:</span> {{ s.summary }}</p>{% endfor %}{% endif %}
+    {% else %}<p class="text-slate-500">No memory stored (it may have been deleted), but transcripts remain.</p>{% endif %}
+  </section>
+  <section class="bg-white shadow rounded p-4 text-sm space-y-3">
+    <h2 class="font-semibold">Stored conversations</h2>
+    <p>{{ conversations|length }} conversation(s), {{ message_count }} stored message(s). Read the full transcripts in Chatwoot.</p>
+    <ul class="text-xs space-y-1">{% for c in conversations %}<li>#{{ c.conversation_id }} · {{ c.last_status or "?" }} · bot {{ c.bot_state }}{% if c.handoff_reason %} · {{ c.handoff_reason }}{% endif %} · {{ c.updated_at|local }}</li>{% endfor %}</ul>
+    {% if can("contacts.delete") %}
+    <div class="border-t pt-3 space-y-2">
+      <h2 class="font-semibold text-red-700">Delete</h2>
+      {% if mem %}
+      <form method="post" action="/admin/contacts/{{ contact_id }}/delete" data-confirm="Delete this customer's memory (name, phone, preferences, notes, orders, summaries)? Transcripts stay. This can't be undone.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="scope" value="memory">
+        <button class="border border-red-300 text-red-700 rounded px-3 py-1">Delete memory only</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/admin/contacts/{{ contact_id }}/delete" data-confirm="Delete EVERYTHING the bot stores about this customer: memory, stored transcripts and bot decisions? Chatwoot keeps its own copy. This can't be undone.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="scope" value="all">
+        <button class="bg-red-700 text-white rounded px-3 py-1">Delete all stored data</button>
+      </form>
+      <p class="text-xs text-slate-500">For a full erasure request, also delete the contact and conversations in Chatwoot.</p>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
